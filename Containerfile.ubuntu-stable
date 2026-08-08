@@ -1,0 +1,32 @@
+FROM docker.io/library/ubuntu:26.04
+
+LABEL org.opencontainers.image.title="ansible" \
+      org.opencontainers.image.description="Ansible 13 (stable) on Ubuntu 26.04, from distro packages" \
+      org.opencontainers.image.licenses="GPL-3.0-or-later" \
+      org.opencontainers.image.source="https://github.com/pdutton/container-ansible" \
+      org.opencontainers.image.url="https://github.com/pdutton/container-ansible" \
+      org.opencontainers.image.vendor="pdutton" \
+      org.opencontainers.image.base.name="docker.io/library/ubuntu:26.04"
+
+# --no-install-recommends plus an explicit list: keeps the functional packages
+# apt would recommend, drops X11/Sphinx/Babel ballast a container never uses.
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ansible \
+      openssh-client \
+      sshpass \
+      python3-jmespath \
+      python3-passlib \
+      python3-xmltodict \
+      python3-selinux \
+      python3-winrm \
+      python3-pyspnego \
+      python3-requests-ntlm \
+      python3-kerberos \
+      python3-gssapi \
+      python3-requests \
+      python3-argcomplete \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /apps
+CMD ["/bin/bash"]
