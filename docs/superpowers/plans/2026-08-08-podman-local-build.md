@@ -1,5 +1,12 @@
 # Phase 1 Local Podman Build Implementation Plan
 
+> **STATUS: COMPLETE.** All seven tasks below were implemented and committed (see the repo's git log on
+> `feature/podman-build`). The `- [ ]` checkboxes throughout this document were never checked off during
+> execution and should not be read as tracking outstanding work — every step they cover is done. A subsequent
+> code-review fix wave (2026-08-08) additionally corrected the defective `.PHONY` line in this document's Task 6
+> code block; see the "Correction during implementation" note under Task 6 for details, and the repo's fix-report
+> for the rest of that wave's changes.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build four Ansible container image variants locally with Podman and verify each by running a smoke-test playbook inside it.
@@ -547,6 +554,21 @@ git commit -m "Add ubuntu-development image: Ansible 14 from pip venv on Ubuntu 
 
 ### Task 6: Makefile
 
+**Correction during implementation:** the code block below now shows the corrected `.PHONY` line,
+`.PHONY: help build test clean`. As originally written, this task's code block had:
+
+```
+.PHONY: help build test clean $(addprefix build-,$(VARIANTS)) $(addprefix test-,$(VARIANTS))
+```
+
+That line is defective: GNU Make skips implicit-rule (and therefore pattern-rule) search for any target listed in
+`.PHONY`, so listing `build-<variant>`/`test-<variant>` there makes their `build-%`/`test-%` pattern rules
+unreachable — every per-variant target would silently no-op ("`make: Nothing to be done for 'test-alpine-stable'`",
+exit 0) instead of building or testing anything. This was caught and fixed before the Makefile was committed — the
+shipped `Makefile` was already correct — but this plan document still had the broken line, so an agent re-running
+the plan from scratch would have reproduced a green-but-builds-nothing build. See the `.PHONY` comment in the code
+block below for the full explanation now carried alongside the fix.
+
 **Files:**
 - Create: `Makefile`
 
@@ -575,13 +597,24 @@ major-stable      := 13
 major-development := 14
 
 .DEFAULT_GOAL := help
-.PHONY: help build test clean $(addprefix build-,$(VARIANTS)) $(addprefix test-,$(VARIANTS))
+# NOTE: deliberately NOT listing the per-variant build-%/test-% names here.
+# This is documented GNU Make behavior, not a version-specific bug: per the
+# manual's Phony Targets section, make skips implicit-rule search (which
+# includes pattern-rule search) for any target listed in .PHONY, because it
+# already knows a phony name does not correspond to a real file. Naming
+# build-<variant>/test-<variant> in .PHONY makes their build-%/test-% pattern
+# rules unreachable, so the recipe silently never runs ("make: Nothing to be
+# done for 'test-alpine-stable'", exit 0) instead of building anything. Do
+# NOT re-add these names to .PHONY. They never correspond to real files, so
+# they are already rebuilt unconditionally on every invocation regardless of
+# .PHONY - omitting them here changes nothing functional and avoids the trap.
+.PHONY: help build test clean
 
 help:
 	@echo "Targets:"
 	@echo "  build                 Build all four variants"
 	@echo "  test                  Smoke-test all four variants"
-	@echo "  clean                 Remove all built images"
+	@echo "  clean                 Remove all tagged images built by this repo"
 	@$(foreach v,$(VARIANTS),echo "  build-$(v)"; echo "  test-$(v)";)
 	@echo
 	@echo "Variants: $(VARIANTS)"
