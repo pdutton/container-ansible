@@ -9,6 +9,11 @@ GIT_REV    := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 major-stable      := 13
 major-development := 14
 
+# Only the Ubuntu variants carry the winrm/kerberos/gssapi/selinux stack; the
+# smoke test asserts on this too, keyed off the OS half of the variant name.
+winrm-alpine  := false
+winrm-ubuntu  := true
+
 .DEFAULT_GOAL := help
 # NOTE: deliberately NOT listing the per-variant build-%/test-% names here.
 # This is documented GNU Make behavior, not a version-specific bug: per the
@@ -27,7 +32,7 @@ help:
 	@echo "Targets:"
 	@echo "  build                 Build all four variants"
 	@echo "  test                  Smoke-test all four variants"
-	@echo "  clean                 Remove all built images"
+	@echo "  clean                 Remove all tagged images built by this repo"
 	@$(foreach v,$(VARIANTS),echo "  build-$(v)"; echo "  test-$(v)";)
 	@echo
 	@echo "Variants: $(VARIANTS)"
@@ -48,7 +53,7 @@ build-%: Containerfile.%
 # `ansible --version` (the core version).
 version-tag-%:
 	@set -eu; \
-	version=$$(podman run --rm $(IMAGE):$* ansible-community --version | awk '{print $$NF}'); \
+	version=$$(podman run --rm $(IMAGE):$* ansible-community --version | awk 'NR==1{print $$NF}'); \
 	case "$$version" in \
 	  [0-9]*.[0-9]*.[0-9]*) ;; \
 	  *) echo "ERROR: could not read bundle version from $(IMAGE):$* (got '$$version')" >&2; exit 1 ;; \
@@ -59,10 +64,17 @@ version-tag-%:
 	echo "Tagged $(IMAGE):$$os-$$version"
 
 test-%: build-%
-	podman run --rm -v ./test:/apps:ro $(IMAGE):$* \
+	podman run --rm -v ./test:/apps:ro,z $(IMAGE):$* \
 	  ansible-playbook -i localhost, -c local smoke.yml \
-	  -e expect_major=$(major-$(word 2,$(subst -, ,$*)))
+	  -e expect_major=$(major-$(word 2,$(subst -, ,$*))) \
+	  -e expect_winrm=$(winrm-$(word 1,$(subst -, ,$*)))
 
+# Removes the two tags this repo applies per variant (<os>-<channel> and
+# <os>-<version>). It does NOT reclaim the orphaned <none> base layers each
+# version-tag-% build leaves behind -- podman rmi on a tag doesn't cascade to
+# the image it was derived from. Run `podman image prune` periodically to
+# clear those; this target intentionally does not do that itself, since a
+# blanket prune would delete images this repo never built.
 clean:
 	@ids=$$(podman images --format '{{.Repository}}:{{.Tag}}' \
 	          | grep -E "^(localhost/)?$(IMAGE):" || true); \

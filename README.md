@@ -7,19 +7,41 @@ variants without requiring complex installs.
 
 ### Usage Examples:
 ```
-alias ansible="podman run -ti --rm -v ~/.ssh:/root/.ssh -v $(pwd):/apps -w /apps localhost/ansible:alpine-stable ansible"
+alias ansible='podman run -ti --rm -v ~/.ssh:/root/.ssh:ro -v "$PWD":/apps -w /apps localhost/ansible:alpine-stable ansible'
 ansible <follow command>
 ```
 
 ```
-alias ansible-playbook="podman run -ti --rm -v ~/.ssh:/root/.ssh -v $(pwd):/apps -w /apps localhost/ansible:alpine-stable ansible-playbook"
+alias ansible-playbook='podman run -ti --rm -v ~/.ssh:/root/.ssh:ro -v "$PWD":/apps -w /apps localhost/ansible:alpine-stable ansible-playbook'
 ansible-playbook -i inventory <follow command>
 ```
+
+The alias body is single-quoted and uses `"$PWD"` rather than `$(pwd)` so the mount is resolved fresh on every
+invocation. A double-quoted alias body substitutes `$(pwd)` once, at the moment the alias is *defined* — it then
+permanently mounts that one directory no matter where you later `cd`, with no error to warn you.
+
+On an SELinux-enforcing host (e.g. Fedora/RHEL), mounting your real `~/.ssh` needs
+`--security-opt label=disable` added to the alias rather than a `:z`/`:Z` suffix on the mount — relabeling
+`~/.ssh` with `:z` would alter the SELinux context of your actual SSH keys on the host, which is actively
+harmful.
 
 Swap `alpine-stable` for any of the other three tags below if you need a different base OS or Ansible channel.
 
 ## Ansible Base Image
 The container image provided by this repo can also be used as a base image for downstream images.
+
+On the `development` variants (`alpine-development`, `ubuntu-development`), Ansible runs from a venv at
+`/opt/ansible`, not from the system Python. Install downstream Python dependencies you want Ansible modules to see
+with `/opt/ansible/bin/pip`, not the system package manager.
+
+- On `ubuntu-development` the venv is created with `--system-site-packages`, so it *also* sees anything installed
+  via `apt` into the system Python — a downstream `apt-get install python3-something` is importable from Ansible
+  there. `/opt/ansible/bin/pip` remains the more direct route and is guaranteed to take effect.
+- On `alpine-development` the venv has no such visibility into `apk`-installed Python packages; only
+  `/opt/ansible/bin/pip` reaches the interpreter Ansible uses.
+
+The `stable` variants (`alpine-stable`, `ubuntu-stable`) run Ansible from the system Python directly, so the
+system package manager (`apk`/`apt`) is the correct way to add downstream Python dependencies there.
 
 ## Image Variants
 
@@ -76,11 +98,16 @@ Requires [Podman](https://podman.io/) and GNU Make.
 make build                 # build all four variants
 make test                  # smoke-test all four variants
 make build-alpine-stable   # build just one variant
-make clean                 # remove every image this repo builds
+make clean                 # remove all tagged images this repo builds
 ```
 
 Run `make help` (or just `make`) to list every target, including the per-variant `build-<variant>` and
 `test-<variant>` names (`test-<variant>` builds first).
+
+`make clean` only removes the tags this repo applies (`<os>-<channel>` and `<os>-<version>` for each variant). Each
+version tag is built as a derived image on top of the freshly built one, so `clean` cannot cascade-delete the
+untagged `<none>` base layers left behind — they accumulate across rebuild cycles. Run `podman image prune` to clear
+those; it is not run automatically here because it would also delete untagged images this repo never built.
 
 ## License
 
