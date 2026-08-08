@@ -21,4 +21,4 @@ RUN apk add --no-cache \
       py3-argcomplete
 
 WORKDIR /apps
-CMD ["/bin/sh"]
+CMD ["ansible", "--help"]
