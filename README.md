@@ -61,22 +61,23 @@ Locally built images are referenced as `localhost/ansible:<tag>`, e.g. `localhos
 
 ### Tags
 
-Each variant produces **two tags** pointing at the same image:
-
-- `<os>-<channel>` — e.g. `alpine-stable`, `ubuntu-development`. Stable across rebuilds; use this in scripts and
-  aliases.
+Each variant produces one immutable tag.
 - `<os>-<version>` — e.g. `alpine-13.0.0`, `ubuntu-14.2.0`. Derived at build time by reading
   `ansible-community --version` out of the freshly built image, so it always reflects what's actually installed. You
   can read the same value yourself:
   ```bash
   podman run --rm localhost/ansible:alpine-stable ansible-community --version
   ```
+Additionally, each variant may have one more dynamic tags that point to it:   
+- `latest` - Points to the latest ansible-stable build.  Updated with each build.
+- `<os>-latest` - e.g. `ansible-latest`, `ubuntu-latest`.  Points to the lateest stable for each os.  Updated with each build.
+- `<os>-stable`, `<os>-development`.  Updated with each build.
 
 For the `stable` variants the version tag only moves when the distro's packaged Ansible does. For the `development`
 variants it moves on every build that happens to pick up a new 14.x release from pip — pip resolves whatever the
 latest 14.x is at build time, so treat `alpine-14.2.0` / `ubuntu-14.2.0` as a snapshot, not a promise.
 
-The eight tags that exist after a full build: `alpine-stable`, `alpine-development`, `ubuntu-stable`,
+Currently, the eight tags that exist after a full build: `alpine-stable`, `alpine-development`, `ubuntu-stable`,
 `ubuntu-development`, `alpine-13.0.0`, `alpine-14.2.0`, `ubuntu-13.1.0`, `ubuntu-14.2.0`.
 
 ## Capability Differences
