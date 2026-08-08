@@ -1,0 +1,7 @@
+.git/
+docs/
+test/
+Makefile
+README.md
+LICENSE
+.superpowers/

@@ -1,0 +1,94 @@
+---
+- name: Smoke-test the ansible container image
+  hosts: localhost
+  gather_facts: false
+  vars:
+    expect_major: ""
+    expect_winrm: "false"
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+
+  tasks:
+    - name: Require expect_major to be supplied
+      ansible.builtin.assert:
+        that:
+          - expect_major | length > 0
+        fail_msg: "Run with -e expect_major=<N>"
+
+    - name: Read the Ansible community bundle version
+      ansible.builtin.command: ansible-community --version
+      register: community_version
+      changed_when: false
+
+    - name: Assert the bundle major matches the channel
+      ansible.builtin.assert:
+        that:
+          - community_version.stdout.split()[-1].split('.')[0] == expect_major
+        fail_msg: >-
+          Expected Ansible major {{ expect_major }}, got
+          '{{ community_version.stdout }}'. The distro may have changed
+          which version this channel resolves to.
+        success_msg: "Ansible bundle {{ community_version.stdout.split()[-1] }}"
+
+    - name: Assert json_query works (requires jmespath)
+      ansible.builtin.assert:
+        that:
+          - >-
+            [{'n': 'a'}, {'n': 'b'}] | community.general.json_query('[].n')
+            == ['a', 'b']
+        fail_msg: "json_query failed - jmespath is missing"
+
+    - name: Assert password_hash works (requires passlib)
+      ansible.builtin.assert:
+        that:
+          - "'x' | password_hash('sha512', 'abcdefghijklmnop') is match('^\\$6\\$')"
+        fail_msg: "password_hash failed - passlib is missing"
+
+    - name: Check Windows/Kerberos/SELinux capability (winrm, gssapi, selinux)
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - -c
+          - "import winrm, gssapi, selinux"
+      register: winrm_capability
+      changed_when: false
+      failed_when: false
+      when: expect_winrm == "true"
+
+    - name: Assert winrm/gssapi/selinux are importable
+      ansible.builtin.assert:
+        that:
+          - winrm_capability.rc == 0
+        fail_msg: >-
+          expect_winrm=true but winrm/gssapi/selinux failed to import under
+          {{ ansible_playbook_python }}: {{ winrm_capability.stderr }}
+        success_msg: "winrm/gssapi/selinux import OK"
+      when: expect_winrm == "true"
+
+    - name: Locate the ssh client
+      ansible.builtin.command: which ssh
+      register: ssh_path
+      changed_when: false
+      failed_when: ssh_path.rc != 0
+
+    - name: Create a directory
+      ansible.builtin.file:
+        path: /tmp/smoke
+        state: directory
+        mode: "0755"
+
+    - name: Copy content into it
+      ansible.builtin.copy:
+        content: "ok\n"
+        dest: /tmp/smoke/result.txt
+        mode: "0644"
+
+    - name: Read it back
+      ansible.builtin.slurp:
+        src: /tmp/smoke/result.txt
+      register: readback
+
+    - name: Assert the file round-tripped
+      ansible.builtin.assert:
+        that:
+          - (readback.content | b64decode) == "ok\n"
+        fail_msg: "copy/slurp round-trip failed"

@@ -1,0 +1,29 @@
+FROM docker.io/library/alpine:3.23
+
+LABEL org.opencontainers.image.title="ansible" \
+      org.opencontainers.image.description="Ansible 14 (development) on Alpine 3.23, from pip" \
+      org.opencontainers.image.licenses="GPL-3.0-or-later" \
+      org.opencontainers.image.source="https://github.com/pdutton/container-ansible" \
+      org.opencontainers.image.url="https://github.com/pdutton/container-ansible" \
+      org.opencontainers.image.vendor="pdutton" \
+      org.opencontainers.image.base.name="docker.io/library/alpine:3.23"
+
+# System Python is PEP 668 externally-managed, so Ansible goes in a venv.
+RUN apk add --no-cache \
+      python3 \
+      py3-pip \
+      openssh-client-default \
+      sshpass \
+ && python3 -m venv /opt/ansible \
+ && /opt/ansible/bin/pip install --no-cache-dir \
+      "ansible>=14,<15" \
+      jmespath \
+      passlib \
+      xmltodict \
+      requests \
+      argcomplete
+
+ENV PATH="/opt/ansible/bin:$PATH"
+
+WORKDIR /apps
+CMD ["/bin/sh"]

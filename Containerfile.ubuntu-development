@@ -1,0 +1,43 @@
+FROM docker.io/library/ubuntu:26.04
+
+LABEL org.opencontainers.image.title="ansible" \
+      org.opencontainers.image.description="Ansible 14 (development) on Ubuntu 26.04, from pip" \
+      org.opencontainers.image.licenses="GPL-3.0-or-later" \
+      org.opencontainers.image.source="https://github.com/pdutton/container-ansible" \
+      org.opencontainers.image.url="https://github.com/pdutton/container-ansible" \
+      org.opencontainers.image.vendor="pdutton" \
+      org.opencontainers.image.base.name="docker.io/library/ubuntu:26.04"
+
+# System Python is PEP 668 externally-managed, so Ansible goes in a venv.
+# Ubuntu ships no Ansible 14 in any suite, so pip is required here. The venv is
+# created with --system-site-packages so it can see the apt-installed
+# winrm/kerberos/gssapi/selinux stack below, giving this variant the same
+# Windows/Kerberos/SELinux capability as ubuntu-stable -- selinux in particular
+# has no usable PyPI equivalent. Only Ansible itself comes from pip.
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      python3 \
+      python3-pip \
+      python3-venv \
+      openssh-client \
+      sshpass \
+      python3-winrm \
+      python3-pyspnego \
+      python3-requests-ntlm \
+      python3-kerberos \
+      python3-gssapi \
+      python3-selinux \
+ && python3 -m venv --system-site-packages /opt/ansible \
+ && /opt/ansible/bin/pip install --no-cache-dir \
+      "ansible>=14,<15" \
+      jmespath \
+      passlib \
+      xmltodict \
+      requests \
+      argcomplete \
+ && rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/opt/ansible/bin:$PATH"
+
+WORKDIR /apps
+CMD ["/bin/bash"]
