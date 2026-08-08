@@ -4,6 +4,8 @@
   gather_facts: false
   vars:
     expect_major: ""
+    expect_winrm: "false"
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
 
   tasks:
     - name: Require expect_major to be supplied
@@ -40,6 +42,27 @@
         that:
           - "'x' | password_hash('sha512', 'abcdefghijklmnop') is match('^\\$6\\$')"
         fail_msg: "password_hash failed - passlib is missing"
+
+    - name: Check Windows/Kerberos/SELinux capability (winrm, gssapi, selinux)
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - -c
+          - "import winrm, gssapi, selinux"
+      register: winrm_capability
+      changed_when: false
+      failed_when: false
+      when: expect_winrm == "true"
+
+    - name: Assert winrm/gssapi/selinux are importable
+      ansible.builtin.assert:
+        that:
+          - winrm_capability.rc == 0
+        fail_msg: >-
+          expect_winrm=true but winrm/gssapi/selinux failed to import under
+          {{ ansible_playbook_python }}: {{ winrm_capability.stderr }}
+        success_msg: "winrm/gssapi/selinux import OK"
+      when: expect_winrm == "true"
 
     - name: Locate the ssh client
       ansible.builtin.command: which ssh
