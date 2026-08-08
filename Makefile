@@ -1,6 +1,10 @@
 IMAGE    ?= ansible
 VARIANTS := alpine-stable alpine-development ubuntu-stable ubuntu-development
 
+# External tools, overridable: `make PODMAN=/usr/local/bin/podman build`
+AWK      ?= /usr/bin/awk
+PODMAN   ?= /usr/bin/podman
+
 BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 GIT_REV    := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 
@@ -15,17 +19,6 @@ winrm-alpine  := false
 winrm-ubuntu  := true
 
 .DEFAULT_GOAL := help
-# NOTE: deliberately NOT listing the per-variant build-%/test-% names here.
-# This is documented GNU Make behavior, not a version-specific bug: per the
-# manual's Phony Targets section, make skips implicit-rule search (which
-# includes pattern-rule search) for any target listed in .PHONY, because it
-# already knows a phony name does not correspond to a real file. Naming
-# build-<variant>/test-<variant> in .PHONY makes their build-%/test-% pattern
-# rules unreachable, so the recipe silently never runs ("make: Nothing to be
-# done for 'test-alpine-stable'", exit 0) instead of building anything. Do
-# NOT re-add these names to .PHONY. They never correspond to real files, so
-# they are already rebuilt unconditionally on every invocation regardless of
-# .PHONY - omitting them here changes nothing functional and avoids the trap.
 .PHONY: help build test clean
 
 help:
@@ -42,7 +35,7 @@ build: $(addprefix build-,$(VARIANTS))
 test: $(addprefix test-,$(VARIANTS))
 
 build-%: Containerfile.%
-	podman build -f Containerfile.$* -t $(IMAGE):$* \
+	$(PODMAN) build -f Containerfile.$* -t $(IMAGE):$* \
 	  --label org.opencontainers.image.created=$(BUILD_DATE) \
 	  --label org.opencontainers.image.revision=$(GIT_REV) \
 	  .
@@ -53,18 +46,18 @@ build-%: Containerfile.%
 # `ansible --version` (the core version).
 version-tag-%:
 	@set -eu; \
-	version=$$(podman run --rm $(IMAGE):$* ansible-community --version | awk 'NR==1{print $$NF}'); \
+	version=$$($(PODMAN) run --rm $(IMAGE):$* ansible-community --version | $(AWK) 'NR==1{print $$NF}'); \
 	case "$$version" in \
 	  [0-9]*.[0-9]*.[0-9]*) ;; \
 	  *) echo "ERROR: could not read bundle version from $(IMAGE):$* (got '$$version')" >&2; exit 1 ;; \
 	esac; \
 	os="$(word 1,$(subst -, ,$*))"; \
 	printf 'FROM %s:%s\nLABEL org.opencontainers.image.version="%s"\n' "$(IMAGE)" "$*" "$$version" \
-	  | podman build -f - -t "$(IMAGE):$$os-$$version" -t "$(IMAGE):$*" .; \
+	  | $(PODMAN) build -f - -t "$(IMAGE):$$os-$$version" -t "$(IMAGE):$*" .; \
 	echo "Tagged $(IMAGE):$$os-$$version"
 
 test-%: build-%
-	podman run --rm -v ./test:/apps:ro,z $(IMAGE):$* \
+	$(PODMAN) run --rm -v ./test:/apps:ro,z $(IMAGE):$* \
 	  ansible-playbook -i localhost, -c local smoke.yml \
 	  -e expect_major=$(major-$(word 2,$(subst -, ,$*))) \
 	  -e expect_winrm=$(winrm-$(word 1,$(subst -, ,$*)))
@@ -76,6 +69,6 @@ test-%: build-%
 # clear those; this target intentionally does not do that itself, since a
 # blanket prune would delete images this repo never built.
 clean:
-	@ids=$$(podman images --format '{{.Repository}}:{{.Tag}}' \
+	@ids=$$($(PODMAN) images --format '{{.Repository}}:{{.Tag}}' \
 	          | grep -E "^(localhost/)?$(IMAGE):" || true); \
-	if [ -n "$$ids" ]; then podman rmi -f $$ids; else echo "nothing to clean"; fi
+	if [ -n "$$ids" ]; then $(PODMAN) rmi -f $$ids; else echo "nothing to clean"; fi
