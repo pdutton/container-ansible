@@ -40,4 +40,4 @@ RUN apt-get update \
 ENV PATH="/opt/ansible/bin:$PATH"
 
 WORKDIR /apps
-CMD ["/bin/bash"]
+CMD ["ansible", "--help"]
