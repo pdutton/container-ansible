@@ -78,15 +78,16 @@ Static labels (in the Containerfiles):
 ```
 org.opencontainers.image.title=ansible
 org.opencontainers.image.description=<per variant>
-org.opencontainers.image.licenses=GPL-3.0-only
+org.opencontainers.image.licenses=GPL-3.0-or-later
 org.opencontainers.image.source=https://github.com/pdutton/container-ansible
 org.opencontainers.image.url=https://github.com/pdutton/container-ansible
 org.opencontainers.image.vendor=pdutton
 org.opencontainers.image.base.name=<base image>
 ```
 
-`GPL-3.0-only` because `LICENSE` is the plain GPLv3 text with no "or later"
-election.
+`GPL-3.0-or-later` per the project's stated intent. `LICENSE` currently holds
+the bare GPLv3 text with no "or later" election, so the README should state the
+election explicitly to match the label.
 
 Dynamic labels (`created`, `revision`, `version`) are supplied by the Makefile
 via `podman build --label`, keeping the Containerfiles free of build args.
