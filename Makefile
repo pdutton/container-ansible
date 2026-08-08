@@ -11,13 +11,16 @@ major-development := 14
 
 .DEFAULT_GOAL := help
 # NOTE: deliberately NOT listing the per-variant build-%/test-% names here.
-# GNU Make 4.4.1 has a quirk where explicitly listing a pattern-rule target's
-# expanded name in .PHONY causes that name to resolve to a phony stub with no
-# prerequisites the first time it is requested, permanently short-circuiting
-# the pattern-rule search ("make: Nothing to be done for 'test-alpine-stable'"
-# instead of running the recipe). Verified with a minimal repro. These targets
-# never correspond to real files, so they are rebuilt unconditionally with or
-# without the .PHONY marking - omitting them here changes nothing functional.
+# This is documented GNU Make behavior, not a version-specific bug: per the
+# manual's Phony Targets section, make skips implicit-rule search (which
+# includes pattern-rule search) for any target listed in .PHONY, because it
+# already knows a phony name does not correspond to a real file. Naming
+# build-<variant>/test-<variant> in .PHONY makes their build-%/test-% pattern
+# rules unreachable, so the recipe silently never runs ("make: Nothing to be
+# done for 'test-alpine-stable'", exit 0) instead of building anything. Do
+# NOT re-add these names to .PHONY. They never correspond to real files, so
+# they are already rebuilt unconditionally on every invocation regardless of
+# .PHONY - omitting them here changes nothing functional and avoids the trap.
 .PHONY: help build test clean
 
 help:
