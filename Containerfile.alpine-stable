@@ -1,0 +1,24 @@
+FROM docker.io/library/alpine:3.23
+
+LABEL org.opencontainers.image.title="ansible" \
+      org.opencontainers.image.description="Ansible 13 (stable) on Alpine 3.23, from distro packages" \
+      org.opencontainers.image.licenses="GPL-3.0-or-later" \
+      org.opencontainers.image.source="https://github.com/pdutton/container-ansible" \
+      org.opencontainers.image.url="https://github.com/pdutton/container-ansible" \
+      org.opencontainers.image.vendor="pdutton" \
+      org.opencontainers.image.base.name="docker.io/library/alpine:3.23"
+
+# Alpine's ansible package pulls no SSH client, so openssh-client-default is
+# required. Note "openssh-client" is only a provides alias and will not resolve.
+RUN apk add --no-cache \
+      ansible \
+      openssh-client-default \
+      sshpass \
+      py3-jmespath \
+      py3-passlib \
+      py3-xmltodict \
+      py3-requests \
+      py3-argcomplete
+
+WORKDIR /apps
+CMD ["/bin/sh"]
