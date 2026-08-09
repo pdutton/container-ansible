@@ -102,7 +102,12 @@ jobs:
       # The short description is set here too, so the whole Hub page is
       # declarative -- leaving it unset would silently preserve whatever was
       # last typed into the web UI.
-      - uses: peter-evans/dockerhub-description@v5
+      # Pinned by SHA, not by tag: this is the only third-party action here and
+      # it is handed a Docker Hub token with write/delete scope. A tag is a
+      # mutable pointer in someone else's repository -- repointing v5 would run
+      # new code against that secret with no change on this side. actions/checkout
+      # stays on a major tag; it is inside GitHub's own trust boundary.
+      - uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
