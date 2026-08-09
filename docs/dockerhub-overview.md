@@ -45,11 +45,11 @@ ubuntu variants if you need those or to extend the container when you need glibc
 Built from [github.com/pdutton/container-ansible](https://github.com/pdutton/container-ansible) —
 full documentation, Containerfiles, and CI live there.
 
-## License
-
-GPL-3.0-or-later
+## Intended Audience
 
 Feel free to use this container image for personal use or learning ansible.
 If you create useful container images based off of this image, please share the code
 you used to produce it so everyone can benefit.
 This container image is not intended for commercial use.
+
+The container image and code is licensed under GPL-3.0-or-later
