@@ -51,16 +51,29 @@ jobs:
           test -x /usr/bin/awk
           podman --version
 
+      # Publishing happens only from master. A dispatch against another branch
+      # still builds and smoke-tests, so a branch can be put through CI, but it
+      # must never overwrite the shared mutable tags (latest, alpine, ubuntu,
+      # <os>-<major>) with unreviewed code. This condition is the exact negation
+      # of the publish condition below -- if it were merely the pull_request
+      # check, a dispatch from a feature branch would match no step at all and
+      # the job would silently do nothing.
       - name: Build and smoke-test
+        if: github.event_name == 'pull_request' || github.ref != 'refs/heads/master'
         run: make test-${{ matrix.variant }}
 
       - name: Log in to Docker Hub
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: printf '%s' "$DOCKERHUB_TOKEN" | podman login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin
 
-      - name: Push
-        if: github.event_name != 'pull_request'
+      # One invocation, not two: push-<variant> depends on test-<variant> which
+      # depends on build-<variant>, so this builds, smoke-tests, and publishes.
+      # Running `make test-` in a separate step first would repeat the whole
+      # chain -- these pattern targets match no real file, so Make re-runs them
+      # on every invocation.
+      - name: Build, smoke-test, and push
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
         run: make push-${{ matrix.variant }}
