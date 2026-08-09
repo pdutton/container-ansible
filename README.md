@@ -1,4 +1,7 @@
 # container-ansible
+
+[![build](https://github.com/pdutton/container-ansible/actions/workflows/build.yml/badge.svg)](https://github.com/pdutton/container-ansible/actions/workflows/build.yml)
+
 Container Image with Ansible
 
 ## Ansible Without Installing
@@ -152,6 +155,20 @@ Run `make help` (or just `make`) to list every target, including the per-variant
 version tag is built as a derived image on top of the freshly built one, so `clean` cannot cascade-delete the
 untagged `<none>` base layers left behind — they accumulate across rebuild cycles. Run `podman image prune` to clear
 those; it is not run automatically here because it would also delete untagged images this repo never built.
+
+## Continuous Integration
+
+`.github/workflows/build.yml` builds and smoke-tests all four variants in parallel on every pull request, and
+additionally publishes them on a push to `master` or a manual `workflow_dispatch`. Pull requests never receive
+registry credentials and never push.
+
+Publishing only ever happens from `master`. A manual `workflow_dispatch` run against another branch still builds
+and smoke-tests that branch, but publishes nothing — the tags in this repo are mutable pointers shared by every
+consumer, and a branch build must not be able to overwrite them.
+
+There is no scheduled rebuild. The `development` variants resolve whatever 14.x pip serves at build time, and a
+base-image security fix only reaches the published images when a build is triggered — so refreshing them is a
+deliberate act: merge to `master`, or run the workflow from the Actions tab.
 
 ## License
 
