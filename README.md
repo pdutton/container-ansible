@@ -48,7 +48,9 @@ system package manager (`apk`/`apt`) is the correct way to add downstream Python
 
 ## Image Variants
 
-Four variants are built from this repo, each on its own Containerfile:
+Four variants are built from this repo, each on its own Containerfile. Bundle versions below are as of
+2026-08-08 and drift: `development` resolves whatever `ansible>=14,<15` pip serves at build time, and CI
+republishes on every push to `master`.
 
 | Tag              | Base image     | Ansible channel | Bundle version | Install method    |
 |------------------|-----------------|------------------|-----------------|--------------------|
@@ -68,6 +70,11 @@ Images are published to [`pdutton/ansible`](https://hub.docker.com/r/pdutton/ans
 
 ```bash
 podman pull docker.io/pdutton/ansible:alpine-stable
+```
+
+Or, with Docker:
+
+```bash
 docker pull pdutton/ansible:latest
 ```
 
@@ -84,8 +91,11 @@ A local build carries the identical tag set.
 | `<os>-<version>` — `alpine-13.0.0` | newest build of that exact bundle version |
 
 The major tag follows the *version*, not the channel. When stable eventually moves to Ansible 14, `ubuntu-14`
-starts being produced by `ubuntu-stable` rather than `ubuntu-development` — which is what "the newest 14 on
-Ubuntu" ought to mean.
+would be produced by *both* `ubuntu-stable` and `ubuntu-development` — the `development` Containerfiles pin
+`ansible>=14,<15`, so development does not vacate major 14 just because stable arrives there, and the four
+variants build as parallel CI jobs with no ordering between them. A channel shift to 14 therefore requires
+bumping the development pin (and `major-development`) to the next major in the same change, not just
+`major-stable`.
 
 Version and major tags are derived at build time by reading `ansible-community --version` out of the freshly
 built image, so they always reflect what is actually installed. You can read the same value yourself:
@@ -94,7 +104,7 @@ built image, so they always reflect what is actually installed. You can read the
 podman run --rm docker.io/pdutton/ansible:alpine-stable ansible-community --version
 ```
 
-The 15 tags that exist after a full build:
+The 15 tags that exist after a full build (version components as of 2026-08-08; see the caveat above):
 
 ```
 alpine-stable        alpine-13   alpine-13.0.0    alpine
@@ -110,10 +120,10 @@ ubuntu-development   ubuntu-14   ubuntu-14.2.0
 
 This is deliberate — it is how a base-image CVE fix reaches someone who pinned a version — but it means this
 repo publishes no content-immutable tag at all. **If you need reproducibility, pin by digest**, which you can
-capture with:
+capture without needing a prior local pull:
 
 ```bash
-podman image inspect --format '{{index .RepoDigests 0}}' docker.io/pdutton/ansible:alpine-stable
+skopeo inspect --format '{{.Digest}}' docker://docker.io/pdutton/ansible:alpine-stable
 ```
 
 For the `stable` variants the version tag only moves when the distro's packaged Ansible does. For the
@@ -159,12 +169,14 @@ those; it is not run automatically here because it would also delete untagged im
 ## Continuous Integration
 
 `.github/workflows/build.yml` builds and smoke-tests all four variants in parallel on every pull request, and
-additionally publishes them on a push to `master` or a manual `workflow_dispatch`. Pull requests never receive
-registry credentials and never push.
+additionally publishes them on a push to `master` or a `workflow_dispatch` run against `master`. Pull requests
+never receive registry credentials and never push.
 
 Publishing only ever happens from `master`. A manual `workflow_dispatch` run against another branch still builds
 and smoke-tests that branch, but publishes nothing — the tags in this repo are mutable pointers shared by every
-consumer, and a branch build must not be able to overwrite them.
+consumer, and a branch build must not be able to overwrite them by accident. (This is an accident guard, not a
+security boundary: `workflow_dispatch` runs the workflow file from the selected ref, so a branch that also edits
+the `if:` conditions above could still publish.)
 
 There is no scheduled rebuild. The `development` variants resolve whatever 14.x pip serves at build time, and a
 base-image security fix only reaches the published images when a build is triggered — so refreshing them is a

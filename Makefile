@@ -53,8 +53,22 @@ winrm-ubuntu  := true
 # major-development above -- those feed the smoke test's expect_major assertion
 # and must stay able to disagree with reality, which is what makes a distro
 # bump fail loudly.
+#
+# Guard: os/channel below come from word 1/2 of $* split on '-' and silently
+# discard anything past word 2. Without this check, a future variant such as
+# ubuntu-stable-slim would compute os=ubuntu, channel=stable and claim
+# ubuntu-stable's tags (ubuntu, ubuntu-13, ubuntu-13.1.0), overwriting them in
+# the public registry -- and the smoke test would not catch it, since
+# major-stable and winrm-ubuntu both still resolve. Checked by reassembling
+# os-channel and comparing to $* (not a case/glob pattern: shell glob `*`
+# matches any character, including `-`, so a bracket-class-based pattern
+# cannot actually exclude extra `-`-separated segments).
 TAG_SET_SH = os="$(word 1,$(subst -, ,$*))"; \
              channel="$(word 2,$(subst -, ,$*))"; \
+             if [ -z "$$os" ] || [ -z "$$channel" ] || [ "$$os-$$channel" != "$*" ]; then \
+               echo "ERROR: variant '$*' is not exactly two non-empty '-'-separated words (<os>-<channel>); refusing to tag, since word 1/word 2 would silently drop the rest and could overwrite another variant's tags" >&2; \
+               exit 1; \
+             fi; \
              major="$${version%%.*}"; \
              tags="$* $$os-$$major $$os-$$version"; \
              if [ "$$channel" = stable ]; then tags="$$tags $$os"; fi; \
