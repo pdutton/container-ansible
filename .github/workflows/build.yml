@@ -82,7 +82,7 @@ jobs:
         run: make push-${{ matrix.variant }}
 
   # Docker Hub does not read anything from this repo on its own, so the overview
-  # page would otherwise drift from docs/dockerhub-overview.md the moment either
+  # page would otherwise drift from DOCKERHUB-OVERVIEW.md the moment either
   # is edited alone. Same master-only guard as the publish steps above: the page
   # is shared by every consumer and a branch build must not rewrite it.
   #
@@ -112,5 +112,5 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: pdutton/ansible
-          readme-filepath: ./docs/dockerhub-overview.md
+          readme-filepath: ./DOCKERHUB-OVERVIEW.md
           short-description: "Ansible on Alpine or Ubuntu, ready to run without installing it"

@@ -3,5 +3,6 @@ docs/
 test/
 Makefile
 README.md
+DOCKERHUB-OVERVIEW.md
 LICENSE
 .superpowers/
