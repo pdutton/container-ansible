@@ -53,14 +53,15 @@ TAG_SET_SH = os="$(word 1,$(subst -, ,$*))"; \
              if [ "$*" = "$(LATEST_VARIANT)" ]; then tags="$$tags latest"; fi
 
 .DEFAULT_GOAL := help
-.PHONY: help build test clean
+.PHONY: help build test push clean
 
 help:
 	@echo "Targets:"
 	@echo "  build                 Build all four variants"
 	@echo "  test                  Smoke-test all four variants"
+	@echo "  push                  Push all four variants to $(REGISTRY)/$(IMAGE)"
 	@echo "  clean                 Remove all tagged images built by this repo"
-	@$(foreach v,$(VARIANTS),echo "  build-$(v)"; echo "  test-$(v)";)
+	@$(foreach v,$(VARIANTS),echo "  build-$(v)"; echo "  test-$(v)"; echo "  push-$(v)";)
 	@echo
 	@echo "Variants: $(VARIANTS)"
 
@@ -96,6 +97,32 @@ test-%: build-%
 	  ansible-playbook -i localhost, -c local smoke.yml \
 	  -e expect_major=$(major-$(word 2,$(subst -, ,$*))) \
 	  -e expect_winrm=$(winrm-$(word 1,$(subst -, ,$*)))
+
+# Mirror every tag in the set to $(REGISTRY). Depends on test-%, so a
+# smoke-test failure blocks the publish and a broken image cannot reach the
+# registry through this path.
+#
+# The version is read back off the label tag-% applied rather than by running
+# the container again -- an inspect, not a container start.
+#
+# podman push SOURCE DESTINATION sends the localhost tag straight to the
+# remote, so no registry-qualified local tag is ever created and `clean` keeps
+# matching the complete set.
+push-%: test-%
+	@set -eu; \
+	version=$$($(PODMAN) image inspect \
+	  --format '{{index .Labels "org.opencontainers.image.version"}}' $(IMAGE):$*); \
+	case "$$version" in \
+	  [0-9]*.[0-9]*.[0-9]*) ;; \
+	  *) echo "ERROR: $(IMAGE):$* carries no usable org.opencontainers.image.version label (got '$$version')" >&2; exit 1 ;; \
+	esac; \
+	$(TAG_SET_SH); \
+	for t in $$tags; do \
+	  echo "Pushing $(REGISTRY)/$(IMAGE):$$t"; \
+	  $(PODMAN) push "$(IMAGE):$$t" "$(REGISTRY)/$(IMAGE):$$t"; \
+	done
+
+push: $(addprefix push-,$(VARIANTS))
 
 # Removes every tag this repo applies -- three to five per variant:
 # <os>-<channel>, <os>-<major>, <os>-<version>, plus <os> on the stable
