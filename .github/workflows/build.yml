@@ -1,0 +1,66 @@
+name: build
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# Nothing here writes to the repository.
+permissions:
+  contents: read
+
+# Cancel superseded pull-request runs, but let a master push finish -- a
+# cancellation mid-push would leave a variant's tag set half-updated in the
+# registry.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: ${{ matrix.variant }}
+    runs-on: ubuntu-latest
+    strategy:
+      # One variant's failure must not stop the other three from publishing.
+      # alpine-development resolves whatever 14.x pip serves that day and is
+      # the most exposed to upstream change.
+      fail-fast: false
+      matrix:
+        variant:
+          - alpine-stable
+          - alpine-development
+          - ubuntu-stable
+          - ubuntu-development
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Default checkout depth is fine: the Makefile's `git rev-parse HEAD`
+      # works at depth 1.
+
+      - name: Ensure podman
+        run: |
+          if ! command -v podman >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y podman
+          fi
+          # The Makefile defaults to absolute tool paths; fail loudly here
+          # rather than with a confusing "no such file" mid-build.
+          test -x /usr/bin/podman
+          test -x /usr/bin/awk
+          podman --version
+
+      - name: Build and smoke-test
+        run: make test-${{ matrix.variant }}
+
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request'
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: printf '%s' "$DOCKERHUB_TOKEN" | podman login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin
+
+      - name: Push
+        if: github.event_name != 'pull_request'
+        run: make push-${{ matrix.variant }}
