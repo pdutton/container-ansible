@@ -9,6 +9,14 @@ PODMAN   ?= /usr/bin/podman
 # `make push REGISTRY=ghcr.io/pdutton`
 REGISTRY ?= docker.io/pdutton
 
+# Every local image reference goes through this, never a bare $(IMAGE). A bare
+# short name resolves to a non-localhost repo when that is the only match
+# (measured on podman 5.8.1), so an unqualified reference on the highest-stakes
+# line in this file -- the push source -- would depend on an implicit
+# tie-break rather than on the name itself. `=` (recursive), not `:=`, so this
+# still tracks an overridden IMAGE.
+LOCAL_IMAGE = localhost/$(IMAGE)
+
 # The one variant that also carries the `latest` tag. Ubuntu is the variant
 # with no capability gaps (WinRM/Kerberos/SELinux work only there) and stable
 # is the conservative channel, so an unqualified pull lands on the image least
@@ -70,7 +78,7 @@ build: $(addprefix build-,$(VARIANTS))
 test: $(addprefix test-,$(VARIANTS))
 
 build-%: Containerfile.%
-	$(PODMAN) build -f Containerfile.$* -t $(IMAGE):$* \
+	$(PODMAN) build -f Containerfile.$* -t $(LOCAL_IMAGE):$* \
 	  --label org.opencontainers.image.created=$(BUILD_DATE) \
 	  --label org.opencontainers.image.revision=$(GIT_REV) \
 	  .
@@ -81,19 +89,19 @@ build-%: Containerfile.%
 # version), not `ansible --version` (the core version).
 tag-%:
 	@set -eu; \
-	version=$$($(PODMAN) run --rm $(IMAGE):$* ansible-community --version | $(AWK) 'NR==1{print $$NF}'); \
+	version=$$($(PODMAN) run --rm $(LOCAL_IMAGE):$* ansible-community --version | $(AWK) 'NR==1{print $$NF}'); \
 	case "$$version" in \
 	  [0-9]*.[0-9]*.[0-9]*) ;; \
-	  *) echo "ERROR: could not read bundle version from $(IMAGE):$* (got '$$version')" >&2; exit 1 ;; \
+	  *) echo "ERROR: could not read bundle version from $(LOCAL_IMAGE):$* (got '$$version')" >&2; exit 1 ;; \
 	esac; \
 	$(TAG_SET_SH); \
-	printf 'FROM %s:%s\nLABEL org.opencontainers.image.version="%s"\n' "$(IMAGE)" "$*" "$$version" \
-	  | $(PODMAN) build -f - -t "$(IMAGE):$*" .; \
-	for t in $$tags; do $(PODMAN) tag "$(IMAGE):$*" "$(IMAGE):$$t"; done; \
-	echo "Tagged $(IMAGE): $$tags"
+	printf 'FROM %s:%s\nLABEL org.opencontainers.image.version="%s"\n' "$(LOCAL_IMAGE)" "$*" "$$version" \
+	  | $(PODMAN) build -f - -t "$(LOCAL_IMAGE):$*" .; \
+	for t in $$tags; do $(PODMAN) tag "$(LOCAL_IMAGE):$*" "$(LOCAL_IMAGE):$$t"; done; \
+	echo "Tagged $(LOCAL_IMAGE): $$tags"
 
 test-%: build-%
-	$(PODMAN) run --rm -v ./test:/apps:ro,z $(IMAGE):$* \
+	$(PODMAN) run --rm -v ./test:/apps:ro,z $(LOCAL_IMAGE):$* \
 	  ansible-playbook -i localhost, -c local smoke.yml \
 	  -e expect_major=$(major-$(word 2,$(subst -, ,$*))) \
 	  -e expect_winrm=$(winrm-$(word 1,$(subst -, ,$*)))
@@ -105,21 +113,28 @@ test-%: build-%
 # The version is read back off the label tag-% applied rather than by running
 # the container again -- an inspect, not a container start.
 #
-# podman push SOURCE DESTINATION sends the localhost tag straight to the
-# remote, so no registry-qualified local tag is ever created and `clean` keeps
-# matching the complete set.
+# The push source is explicitly localhost-qualified ($(LOCAL_IMAGE)), not a
+# bare short name -- a bare name can resolve to a non-localhost repo when
+# that's the only match, which would make this, the highest-stakes line in
+# the repo, depend on an implicit tie-break. podman push SOURCE DESTINATION
+# never creates a registry-qualified local tag, so `clean` keeps matching the
+# complete set.
+#
+# Not atomic: a failure partway through the loop leaves the earlier tags in
+# this run already published and the remaining ones stale. The failure is
+# loud (non-zero exit), which is the requirement, but it is not a rollback.
 push-%: test-%
 	@set -eu; \
 	version=$$($(PODMAN) image inspect \
-	  --format '{{index .Labels "org.opencontainers.image.version"}}' $(IMAGE):$*); \
+	  --format '{{index .Labels "org.opencontainers.image.version"}}' $(LOCAL_IMAGE):$*); \
 	case "$$version" in \
 	  [0-9]*.[0-9]*.[0-9]*) ;; \
-	  *) echo "ERROR: $(IMAGE):$* carries no usable org.opencontainers.image.version label (got '$$version')" >&2; exit 1 ;; \
+	  *) echo "ERROR: $(LOCAL_IMAGE):$* carries no usable org.opencontainers.image.version label (got '$$version')" >&2; exit 1 ;; \
 	esac; \
 	$(TAG_SET_SH); \
 	for t in $$tags; do \
 	  echo "Pushing $(REGISTRY)/$(IMAGE):$$t"; \
-	  $(PODMAN) push "$(IMAGE):$$t" "$(REGISTRY)/$(IMAGE):$$t"; \
+	  $(PODMAN) push "$(LOCAL_IMAGE):$$t" "$(REGISTRY)/$(IMAGE):$$t"; \
 	done
 
 push: $(addprefix push-,$(VARIANTS))
@@ -129,7 +144,7 @@ push: $(addprefix push-,$(VARIANTS))
 # variants and `latest` on $(LATEST_VARIANT). Push never creates a
 # registry-qualified local tag, so the localhost-anchored match below still
 # covers the complete set. It does NOT reclaim the orphaned <none> base layers each
-# version-tag-% build leaves behind -- podman rmi on a tag doesn't cascade to
+# tag-% build leaves behind -- podman rmi on a tag doesn't cascade to
 # the image it was derived from. Run `podman image prune` periodically to
 # clear those; this target intentionally does not do that itself, since a
 # blanket prune would delete images this repo never built.
