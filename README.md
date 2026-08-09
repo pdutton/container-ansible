@@ -1,4 +1,7 @@
 # container-ansible
+
+[![build](https://github.com/pdutton/container-ansible/actions/workflows/build.yml/badge.svg)](https://github.com/pdutton/container-ansible/actions/workflows/build.yml)
+
 Container Image with Ansible
 
 ## Ansible Without Installing
@@ -7,12 +10,12 @@ variants without requiring complex installs.
 
 ### Usage Examples:
 ```
-alias ansible='podman run -ti --rm -v ~/.ssh:/root/.ssh:ro -v "$PWD":/apps -w /apps localhost/ansible:alpine-stable ansible'
+alias ansible='podman run -ti --rm -v ~/.ssh:/root/.ssh:ro -v "$PWD":/apps -w /apps docker.io/pdutton/ansible:alpine-stable ansible'
 ansible <follow command>
 ```
 
 ```
-alias ansible-playbook='podman run -ti --rm -v ~/.ssh:/root/.ssh:ro -v "$PWD":/apps -w /apps localhost/ansible:alpine-stable ansible-playbook'
+alias ansible-playbook='podman run -ti --rm -v ~/.ssh:/root/.ssh:ro -v "$PWD":/apps -w /apps docker.io/pdutton/ansible:alpine-stable ansible-playbook'
 ansible-playbook -i inventory <follow command>
 ```
 
@@ -59,26 +62,63 @@ only carries 13 — so both `development` variants install via pip into a venv i
 
 Locally built images are referenced as `localhost/ansible:<tag>`, e.g. `localhost/ansible:ubuntu-stable`.
 
+### Published Images
+
+Images are published to [`pdutton/ansible`](https://hub.docker.com/r/pdutton/ansible) on Docker Hub:
+
+```bash
+podman pull docker.io/pdutton/ansible:alpine-stable
+docker pull pdutton/ansible:latest
+```
+
+A local build carries the identical tag set.
+
 ### Tags
 
-Each variant produces one immutable tag.
-- `<os>-<version>` — e.g. `alpine-13.0.0`, `ubuntu-14.2.0`. Derived at build time by reading
-  `ansible-community --version` out of the freshly built image, so it always reflects what's actually installed. You
-  can read the same value yourself:
-  ```bash
-  podman run --rm localhost/ansible:alpine-stable ansible-community --version
-  ```
-Additionally, each variant may have one more dynamic tags that point to it:   
-- `latest` - Points to the latest ansible-stable build.  Updated with each build.
-- `<os>-latest` - e.g. `ansible-latest`, `ubuntu-latest`.  Points to the lateest stable for each os.  Updated with each build.
-- `<os>-stable`, `<os>-development`.  Updated with each build.
+| Tag | Resolves to |
+|---|---|
+| `latest` | `ubuntu-stable` — the variant with no capability gaps, on the conservative channel |
+| `ubuntu`, `alpine` | that OS's `stable` variant |
+| `<os>-stable`, `<os>-development` | newest build of that channel on that OS |
+| `<os>-<major>` — `alpine-13`, `ubuntu-14` | newest build of that Ansible major on that OS |
+| `<os>-<version>` — `alpine-13.0.0` | newest build of that exact bundle version |
 
-For the `stable` variants the version tag only moves when the distro's packaged Ansible does. For the `development`
-variants it moves on every build that happens to pick up a new 14.x release from pip — pip resolves whatever the
-latest 14.x is at build time, so treat `alpine-14.2.0` / `ubuntu-14.2.0` as a snapshot, not a promise.
+The major tag follows the *version*, not the channel. When stable eventually moves to Ansible 14, `ubuntu-14`
+starts being produced by `ubuntu-stable` rather than `ubuntu-development` — which is what "the newest 14 on
+Ubuntu" ought to mean.
 
-Currently, the eight tags that exist after a full build: `alpine-stable`, `alpine-development`, `ubuntu-stable`,
-`ubuntu-development`, `alpine-13.0.0`, `alpine-14.2.0`, `ubuntu-13.1.0`, `ubuntu-14.2.0`.
+Version and major tags are derived at build time by reading `ansible-community --version` out of the freshly
+built image, so they always reflect what is actually installed. You can read the same value yourself:
+
+```bash
+podman run --rm docker.io/pdutton/ansible:alpine-stable ansible-community --version
+```
+
+The 15 tags that exist after a full build:
+
+```
+alpine-stable        alpine-13   alpine-13.0.0    alpine
+alpine-development   alpine-14   alpine-14.2.0
+ubuntu-stable        ubuntu-13   ubuntu-13.1.0    ubuntu    latest
+ubuntu-development   ubuntu-14   ubuntu-14.2.0
+```
+
+#### Every tag here is mutable, including the version tags
+
+`alpine-13.0.0` looks like a pin. It is not. A rebuild that again resolves to 13.0.0 re-pushes that tag at a
+*new* image carrying fresher base-OS packages.
+
+This is deliberate — it is how a base-image CVE fix reaches someone who pinned a version — but it means this
+repo publishes no content-immutable tag at all. **If you need reproducibility, pin by digest**, which you can
+capture with:
+
+```bash
+podman image inspect --format '{{index .RepoDigests 0}}' docker.io/pdutton/ansible:alpine-stable
+```
+
+For the `stable` variants the version tag only moves when the distro's packaged Ansible does. For the
+`development` variants it moves on every build that picks up a newer 14.x from pip, since pip resolves whatever
+the latest 14.x is at build time.
 
 ## Capability Differences
 
@@ -98,17 +138,37 @@ Requires [Podman](https://podman.io/) and GNU Make.
 ```bash
 make build                 # build all four variants
 make test                  # smoke-test all four variants
+make push                  # build, test, and publish all four to Docker Hub
 make build-alpine-stable   # build just one variant
 make clean                 # remove all tagged images this repo builds
 ```
 
+`make build` applies the complete tag set locally, so a local build and a published one leave identical tag
+state — which is what makes a CI publish reproducible on your own machine. `push-<variant>` depends on
+`test-<variant>`, so a failing smoke test blocks the publish. Publishing requires `podman login docker.io`
+first; override the destination with `make push REGISTRY=ghcr.io/pdutton`.
+
 Run `make help` (or just `make`) to list every target, including the per-variant `build-<variant>` and
 `test-<variant>` names (`test-<variant>` builds first).
 
-`make clean` only removes the tags this repo applies (`<os>-<channel>` and `<os>-<version>` for each variant). Each
+`make clean` only removes the tags this repo applies (three to five per variant, listed above). Each
 version tag is built as a derived image on top of the freshly built one, so `clean` cannot cascade-delete the
 untagged `<none>` base layers left behind — they accumulate across rebuild cycles. Run `podman image prune` to clear
 those; it is not run automatically here because it would also delete untagged images this repo never built.
+
+## Continuous Integration
+
+`.github/workflows/build.yml` builds and smoke-tests all four variants in parallel on every pull request, and
+additionally publishes them on a push to `master` or a manual `workflow_dispatch`. Pull requests never receive
+registry credentials and never push.
+
+Publishing only ever happens from `master`. A manual `workflow_dispatch` run against another branch still builds
+and smoke-tests that branch, but publishes nothing — the tags in this repo are mutable pointers shared by every
+consumer, and a branch build must not be able to overwrite them.
+
+There is no scheduled rebuild. The `development` variants resolve whatever 14.x pip serves at build time, and a
+base-image security fix only reaches the published images when a build is triggered — so refreshing them is a
+deliberate act: merge to `master`, or run the workflow from the Actions tab.
 
 ## License
 
@@ -121,6 +181,4 @@ and this section is what makes that label accurate.
 
 The following are not implemented yet and should not be treated as available today:
 
-- A more familiar tag scheme layered on top of the current one, e.g. `latest`, `alpine`, `ubuntu`, `alpine-13`,
-  `ubuntu-13`, `alpine-14`, `ubuntu-14`, and pinned patch tags like `alpine-13.8.0`.
 - Multi-arch builds for both `amd64` and `arm64`.
