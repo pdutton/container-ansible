@@ -34,7 +34,10 @@ jobs:
           - ubuntu-development
 
     steps:
-      - uses: actions/checkout@v4
+      # v7 runs on Node.js 24. v4 targets Node.js 20, which is deprecated, and
+      # the runner forces it onto 24 anyway while emitting a warning on every
+      # job.
+      - uses: actions/checkout@v7
 
       # Default checkout depth is fine: the Makefile's `git rev-parse HEAD`
       # works at depth 1.
