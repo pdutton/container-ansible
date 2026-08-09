@@ -4,7 +4,7 @@
 
 **Goal:** Publish the four Ansible image variants to `docker.io/pdutton/ansible` under a tag scheme whose dynamic tags always resolve to the newest relevant build, then drive that build-test-publish cycle from GitHub Actions.
 
-**Architecture:** The Makefile owns the entire tag scheme. A single shell snippet, `TAG_SET_SH`, derives the full tag list for a variant from the bundle version detected inside the freshly built image; `tag-%` applies that list locally and `push-%` mirrors it to the registry. The GitHub Actions workflow is deliberately thin — a four-way matrix that runs `make test-<variant>` on every event and `make push-<variant>` only on non-pull-request events.
+**Architecture:** The Makefile owns the entire tag scheme. A single shell snippet, `TAG_SET_SH`, derives the full tag list for a variant from the bundle version detected inside the freshly built image; `tag-%` applies that list locally and `push-%` mirrors it to the registry. The GitHub Actions workflow is deliberately thin — a four-way matrix that runs `make test-<variant>` (build and smoke-test only) except when the ref is `master` and the event isn't a pull request, in which case it runs `make push-<variant>` instead (which builds, tests, and publishes in one invocation). **Amended during implementation:** publishing turned out to need restricting to `master`, not merely excluding pull requests — see Task 4.
 
 **Tech Stack:** GNU Make, Podman 5.x, GitHub Actions, Docker Hub registry, Ansible (community bundle).
 
@@ -29,7 +29,7 @@ These apply to **every** task. Values are exact — do not substitute near-equiv
 | File | Responsibility | Change |
 |---|---|---|
 | `Makefile` | The single place the tag scheme is defined, applied, and pushed | Modify |
-| `.github/workflows/build.yml` | Run `make test-<variant>` on every event; `make push-<variant>` off pull requests | Create |
+| `.github/workflows/build.yml` | Run `make test-<variant>` except on a non-pull-request `master` ref, where `make push-<variant>` runs instead | Create |
 | `README.md` | Document the published repo, the 15 tags, their mutability, and CI | Modify |
 | `docs/superpowers/specs/2026-08-08-dockerhub-publish-design.md` | The approved design | Unchanged |
 
@@ -86,12 +86,26 @@ In `Makefile`, immediately after the `PODMAN ?= /usr/bin/podman` line, add:
 # `make push REGISTRY=ghcr.io/pdutton`
 REGISTRY ?= docker.io/pdutton
 
+# Every local image reference goes through this, never a bare $(IMAGE). A bare
+# short name resolves to a non-localhost repo when that is the only match
+# (measured on podman 5.8.1), so an unqualified reference on the highest-stakes
+# line in this file -- the push source -- would depend on an implicit
+# tie-break rather than on the name itself. `=` (recursive), not `:=`, so this
+# still tracks an overridden IMAGE.
+LOCAL_IMAGE = localhost/$(IMAGE)
+
 # The one variant that also carries the `latest` tag. Ubuntu is the variant
 # with no capability gaps (WinRM/Kerberos/SELinux work only there) and stable
 # is the conservative channel, so an unqualified pull lands on the image least
 # likely to fail in a way the puller cannot diagnose.
 LATEST_VARIANT := ubuntu-stable
 ```
+
+**Amended during implementation:** `LOCAL_IMAGE` was not part of the original
+plan for this step; it was added once the podman short-name resolution risk on
+the push source (Task 2) was identified, and applied everywhere a local image
+is referenced, not just there. The code blocks below reflect the as-built
+form.
 
 - [ ] **Step 4: Add the tag-set snippet**
 
@@ -133,17 +147,19 @@ Delete the entire existing `version-tag-%` target — its comment block and reci
 # version), not `ansible --version` (the core version).
 tag-%:
 	@set -eu; \
-	version=$$($(PODMAN) run --rm $(IMAGE):$* ansible-community --version | $(AWK) 'NR==1{print $$NF}'); \
+	version=$$($(PODMAN) run --rm $(LOCAL_IMAGE):$* ansible-community --version | $(AWK) 'NR==1{print $$NF}'); \
 	case "$$version" in \
 	  [0-9]*.[0-9]*.[0-9]*) ;; \
-	  *) echo "ERROR: could not read bundle version from $(IMAGE):$* (got '$$version')" >&2; exit 1 ;; \
+	  *) echo "ERROR: could not read bundle version from $(LOCAL_IMAGE):$* (got '$$version')" >&2; exit 1 ;; \
 	esac; \
 	$(TAG_SET_SH); \
-	printf 'FROM %s:%s\nLABEL org.opencontainers.image.version="%s"\n' "$(IMAGE)" "$*" "$$version" \
-	  | $(PODMAN) build -f - -t "$(IMAGE):$*" .; \
-	for t in $$tags; do $(PODMAN) tag "$(IMAGE):$*" "$(IMAGE):$$t"; done; \
-	echo "Tagged $(IMAGE): $$tags"
+	printf 'FROM %s:%s\nLABEL org.opencontainers.image.version="%s"\n' "$(LOCAL_IMAGE)" "$*" "$$version" \
+	  | $(PODMAN) build -f - -t "$(LOCAL_IMAGE):$*" .; \
+	for t in $$tags; do $(PODMAN) tag "$(LOCAL_IMAGE):$*" "$(LOCAL_IMAGE):$$t"; done; \
+	echo "Tagged $(LOCAL_IMAGE): $$tags"
 ```
+
+(As-built; the original step used a bare `$(IMAGE)` throughout before `LOCAL_IMAGE` was introduced — see Step 3's note.)
 
 The derived image is built once under the channel tag and then `podman tag`-ed to every other name, rather than passing a variable-length list of `-t` flags to the build. `$tags` contains `$*` itself; re-tagging an image to the name it already has is a no-op.
 
@@ -280,25 +296,33 @@ In `Makefile`, immediately after the `test-%` target, add:
 # The version is read back off the label tag-% applied rather than by running
 # the container again -- an inspect, not a container start.
 #
-# podman push SOURCE DESTINATION sends the localhost tag straight to the
-# remote, so no registry-qualified local tag is ever created and `clean` keeps
-# matching the complete set.
+# The push source is explicitly localhost-qualified ($(LOCAL_IMAGE)), not a
+# bare short name -- a bare name can resolve to a non-localhost repo when
+# that's the only match, which would make this, the highest-stakes line in
+# the repo, depend on an implicit tie-break. podman push SOURCE DESTINATION
+# never creates a registry-qualified local tag, so `clean` keeps matching the
+# complete set.
 push-%: test-%
 	@set -eu; \
 	version=$$($(PODMAN) image inspect \
-	  --format '{{index .Labels "org.opencontainers.image.version"}}' $(IMAGE):$*); \
+	  --format '{{index .Labels "org.opencontainers.image.version"}}' $(LOCAL_IMAGE):$*); \
 	case "$$version" in \
 	  [0-9]*.[0-9]*.[0-9]*) ;; \
-	  *) echo "ERROR: $(IMAGE):$* carries no usable org.opencontainers.image.version label (got '$$version')" >&2; exit 1 ;; \
+	  *) echo "ERROR: $(LOCAL_IMAGE):$* carries no usable org.opencontainers.image.version label (got '$$version')" >&2; exit 1 ;; \
 	esac; \
 	$(TAG_SET_SH); \
 	for t in $$tags; do \
 	  echo "Pushing $(REGISTRY)/$(IMAGE):$$t"; \
-	  $(PODMAN) push "$(IMAGE):$$t" "$(REGISTRY)/$(IMAGE):$$t"; \
+	  $(PODMAN) push "$(LOCAL_IMAGE):$$t" "$(REGISTRY)/$(IMAGE):$$t"; \
 	done
 
 push: $(addprefix push-,$(VARIANTS))
 ```
+
+(As-built, using `LOCAL_IMAGE` — see Task 1 Step 3's note. The push source in
+particular is why `LOCAL_IMAGE` was introduced in the first place: this line
+is the one that reaches an external registry if short-name resolution guesses
+wrong.)
 
 - [ ] **Step 4: Verify the label read works**
 
@@ -681,27 +705,55 @@ jobs:
           test -x /usr/bin/awk
           podman --version
 
+      # Publishing happens only from master. A dispatch against another branch
+      # still builds and smoke-tests, so a branch can be put through CI, but it
+      # must never overwrite the shared mutable tags (latest, alpine, ubuntu,
+      # <os>-<major>) with unreviewed code. This condition is the exact negation
+      # of the publish condition below -- if it were merely the pull_request
+      # check, a dispatch from a feature branch would match no step at all and
+      # the job would silently do nothing.
       - name: Build and smoke-test
+        if: github.event_name == 'pull_request' || github.ref != 'refs/heads/master'
         run: make test-${{ matrix.variant }}
 
       - name: Log in to Docker Hub
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: printf '%s' "$DOCKERHUB_TOKEN" | podman login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin
 
-      - name: Push
-        if: github.event_name != 'pull_request'
+      # One invocation, not two: push-<variant> depends on test-<variant> which
+      # depends on build-<variant>, so this builds, smoke-tests, and publishes.
+      # Running `make test-` in a separate step first would repeat the whole
+      # chain -- these pattern targets match no real file, so Make re-runs them
+      # on every invocation.
+      - name: Build, smoke-test, and push
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
         run: make push-${{ matrix.variant }}
 ```
 
-Two details that are load-bearing:
+**Amended during implementation:** the shape above is not what this step
+originally specified. Two problems surfaced while implementing it:
+
+1. Excluding only pull requests would have let `workflow_dispatch` against a
+   non-master branch publish, and it would let *every* push branch publish if
+   this workflow ever gained a `push:` trigger beyond `master` — publishing
+   needed to be restricted to `master` specifically, not merely "not a pull
+   request".
+2. The original two-step split — an unconditional `make test-<variant>` step,
+   then a separately-guarded `make push-<variant>` step — would have rebuilt
+   the whole chain twice on the publishing path: `build-%`/`test-%`/`push-%`
+   match no real files, so a second, separate `make` invocation re-runs them
+   rather than seeing the first invocation's work as already done. The
+   as-built workflow instead has exactly one `make` step per branch, gated by
+   conditions that are exact complements of each other, so every run does
+   precisely one of "test" or "build+test+push".
+
+Two further details that are load-bearing:
 
 - The `Ensure podman` step uses `if ... fi`, not `command -v podman || sudo apt-get update && sudo apt-get install -y podman`. Shell parses `a || b && c` as `(a || b) && c`, so the one-liner form installs podman *even when it is already present* — a quiet minute wasted on every run.
 - The secrets reach the login step through `env:` rather than being interpolated directly into the `run:` script. A secret containing shell metacharacters cannot then alter the command.
-
-The `Push` step re-uses the images from `Build and smoke-test`; `push-%` depends on `test-%`, and Make will not rebuild what is already up to date within the job.
 
 - [ ] **Step 4: Commit and push the branch**
 
@@ -717,6 +769,25 @@ git -C /home/pdutton/projects/container-ansible/feature/dockerhub-publish push -
 gh pr create --repo pdutton/container-ansible --base master --head feature/dockerhub-publish \
   --title "Publish images to Docker Hub and build them in CI" \
   --body "Implements docs/superpowers/specs/2026-08-08-dockerhub-publish-design.md"
+```
+
+**Check `mergeable_state` before polling for a run.** `pull_request` workflows
+run against GitHub's synthetic merge commit at `refs/pull/N/merge`, which
+GitHub computes lazily and only when the PR is actually mergeable. If there is
+a merge conflict, that ref never materializes and no run is ever scheduled —
+`gh pr checks --watch` then just polls forever with nothing to show, which is
+exactly what happened once during this implementation (a ~6 minute stall
+before the cause was found). Confirm before waiting:
+
+```bash
+gh pr view --repo pdutton/container-ansible --json mergeable,mergeStateStatus
+```
+
+Expected: `"mergeable": "MERGEABLE"`. If it instead reports `CONFLICTING`,
+resolve the conflict and push before proceeding — a run will not appear no
+matter how long you wait. Only once this is confirmed:
+
+```bash
 gh pr checks --repo pdutton/container-ansible --watch
 ```
 
@@ -770,13 +841,20 @@ In `README.md`, insert a new section immediately before `## License`:
 ## Continuous Integration
 
 `.github/workflows/build.yml` builds and smoke-tests all four variants in parallel on every pull request, and
-additionally publishes them on a push to `master` or a manual `workflow_dispatch`. Pull requests never receive
-registry credentials and never push.
+additionally publishes them on a push to `master` or a `workflow_dispatch` run against `master`. Pull requests
+never receive registry credentials and never push.
 
 There is no scheduled rebuild. The `development` variants resolve whatever 14.x pip serves at build time, and a
 base-image security fix only reaches the published images when a build is triggered — so refreshing them is a
 deliberate act: merge to `master`, or run the workflow from the Actions tab.
 ```
+
+**Amended during implementation:** the original text here said "on a push to
+`master` or a manual `workflow_dispatch`", unqualified — false, and
+contradicted by the very next paragraph's master-only restriction (added to
+the shipped README but not back-ported to this plan text until now). A
+`workflow_dispatch` run against a non-master branch builds and smoke-tests but
+publishes nothing.
 
 - [ ] **Step 3: Commit and push**
 
@@ -833,6 +911,10 @@ Expected: four jobs pass with the login and push steps running.
 
 - [ ] **Step 7: Clean up the worktree**
 
+**Run the whole-branch review before this step, not after.** Removing the
+worktree deletes the working tree a reviewer would diff against; a
+final-review pass over the complete branch needs the worktree to still exist.
+
 ```bash
 git -C /home/pdutton/projects/container-ansible/primary pull
 git -C /home/pdutton/projects/container-ansible/primary worktree remove ../feature/dockerhub-publish
@@ -852,4 +934,4 @@ Recorded so an implementer recognises them rather than debugging from scratch:
 | `push-%` errors that the version label is unusable | `.Labels` is the wrong path for this podman version — use `.Config.Labels` (Task 2 Step 4) |
 | CI installs podman on every run despite it being preinstalled | The `a \|\| b && c` precedence trap in the `Ensure podman` step |
 | `make clean` leaves `latest` or `alpine` behind | A registry-qualified tag was created locally, escaping the `^(localhost/)?$(IMAGE):` match |
-| A pull-request run pushes to Docker Hub | Missing or misspelled `if: github.event_name != 'pull_request'` guard |
+| A pull-request run pushes to Docker Hub, or a `workflow_dispatch` against a non-master branch pushes | Missing, misspelled, or non-complementary publish guard — as-built, publishing requires both `github.event_name != 'pull_request'` **and** `github.ref == 'refs/heads/master'` |

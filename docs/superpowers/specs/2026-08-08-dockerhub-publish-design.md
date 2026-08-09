@@ -18,7 +18,9 @@ it contracts with.
 - **Phase 2** — Makefile gains the full tag set and `push` targets. Publishing
   is driven from a developer's machine.
 - **Phase 3** — a GitHub Actions workflow runs the same targets on PRs (build
-  and test only) and on master pushes and manual dispatch (build, test, push).
+  and test only) and, restricted to `master` (a push or a `workflow_dispatch`
+  run against `master` — amended during implementation, see Phase 3 below),
+  build, test, and push.
 
 ### Non-goals
 
@@ -59,10 +61,15 @@ whose bundle version, read out of the freshly built image, is `X.Y.Z`:
 | `latest` | `variant == ubuntu-stable` | the default image |
 
 `<major>` is the leading component of the detected version, not a constant tied
-to the channel. The distinction matters on a future channel shift: when stable
-moves to Ansible 14, `ubuntu-14` begins to be produced by `ubuntu-stable`
-instead of `ubuntu-development`, which is the correct reading of "the newest 14
-on Ubuntu" and requires no code change.
+to the channel. **Amended during implementation:** a future channel shift is
+not the code-free event this originally described. The `development`
+Containerfiles hard-pin `ansible>=14,<15`, so when stable moves to Ansible 14,
+`ubuntu-14` would be produced by *both* `ubuntu-stable` and
+`ubuntu-development` — the four variants are parallel CI matrix jobs with no
+ordering between them, so the winner would be nondeterministic. A channel
+shift to 14 therefore requires bumping the development pin (and
+`major-development`) to the next major in the same change that bumps
+`major-stable`, not a tag-scheme change alone.
 
 The Makefile's existing `major-stable := 13` / `major-development := 14`
 variables must **not** be reused for tag math. They exist to feed the smoke
@@ -122,6 +129,16 @@ it to each remaining name. This keeps the `printf | podman build -f -` pipeline
 unchanged from Phase 1 and avoids constructing a variable-length `-t` argument
 list inside the build command.
 
+**Amended during implementation:** every local image reference — all 11 sites,
+not just the push source — goes through a new `LOCAL_IMAGE = localhost/$(IMAGE)`
+variable (`=`, not `:=`, so it still tracks an overridden `IMAGE`), never a bare
+`$(IMAGE):$*`. Podman short-name resolution can land a bare reference on a
+non-localhost repo when that's the only match (observed on podman 5.8.1), which
+would make the push source — the highest-stakes line in the file — depend on an
+implicit tie-break rather than being safe by construction. Qualifying every
+local reference, not only the push source, keeps the rule uniform and
+trivially auditable rather than "safe except where someone forgot."
+
 ### New targets
 
 ```make
@@ -142,8 +159,11 @@ Three properties this shape guarantees:
 - **`push-%` depends on `test-%`.** A smoke-test failure blocks the publish; a
   broken image cannot reach the registry through this path. `test-%` already
   depends on `build-%`, so a single `make push-alpine-stable` builds, tests, and
-  publishes in dependency order, and repeated invocations within one job do not
-  rebuild.
+  publishes in dependency order. **Amended during implementation:** this only
+  holds within that one `make` invocation. `build-%`/`test-%`/`push-%` match no
+  real files, so a *second*, separate `make` invocation in the same job re-runs
+  the whole chain rather than seeing it as already satisfied — which is why the
+  as-built workflow calls `make` exactly once per job (see Phase 3).
 - **No registry-qualified local tags.** `podman push SOURCE DESTINATION` sends
   `localhost/ansible:alpine-13` to `docker.io/pdutton/ansible:alpine-13` without
   ever creating a local tag under the registry name. `make clean`'s existing
@@ -248,13 +268,27 @@ Each job runs on `ubuntu-latest`:
    GitHub-hosted Ubuntu runners ship podman, but the guard costs nothing and
    survives a runner-image change — and it is a check, not an unconditional
    install, so it does not spend a minute on every run.
-3. `make test-${{ matrix.variant }}` — builds, then smoke-tests.
-4. Publish, guarded by `if: github.event_name != 'pull_request'`:
-   `podman login docker.io` with the secrets, then
-   `make push-${{ matrix.variant }}`.
 
-Step 4 re-uses the images from step 3; Make's dependency graph prevents a
-rebuild within the job.
+**Amended during implementation:** publishing turned out to need restricting to
+`master`, not merely excluding pull requests, and the original two-step split
+(an unconditional test step, then a separately-guarded push step) would have
+rebuilt the whole chain twice on the publishing path — `build-%`/`test-%`/
+`push-%` match no real files, so Make re-runs them on every invocation; there
+is no dependency-graph memory across separate `make` invocations within a job.
+The as-built workflow instead has exactly one step per branch, gated by exact
+complements of the same two conditions:
+
+3. `Build and smoke-test`, `if: github.event_name == 'pull_request' ||
+   github.ref != 'refs/heads/master'`: `make test-${{ matrix.variant }}`.
+4. `Log in to Docker Hub` and `Build, smoke-test, and push`, `if:
+   github.event_name != 'pull_request' && github.ref == 'refs/heads/master'`:
+   `podman login docker.io` with the secrets, then a single
+   `make push-${{ matrix.variant }}` (which depends on `test-%`, which depends
+   on `build-%`, so this one invocation builds, tests, and publishes).
+
+Exactly one of the two conditions is true for any event/ref combination, so
+every run does exactly one of "test" or "build+test+push" — never both, never
+neither.
 
 ### Secrets
 
@@ -270,7 +304,8 @@ there is no path on which a fork PR fails for want of a credential.
    confirm the registry is untouched.
 2. A merge to master publishes; re-run the Phase 2 tag verification against the
    CI-published images.
-3. A `workflow_dispatch` run publishes.
+3. A `workflow_dispatch` run against `master` publishes. A `workflow_dispatch`
+   run against another branch builds and smoke-tests but publishes nothing.
 
 ## README Changes
 
@@ -288,8 +323,9 @@ Spanning both phases:
 
 ## Accepted Risks
 
-**No scheduled rebuild.** Without a cron trigger, images are rebuilt only on a
-master push or a manual dispatch. Two consequences, accepted deliberately:
+**No scheduled rebuild.** Without a cron trigger, published images are
+refreshed only on a master push or a `workflow_dispatch` run against master.
+Two consequences, accepted deliberately:
 
 - The `development` variants resolve whatever 14.x pip serves at build time, so
   a published `alpine-development` can sit at a stale 14.x indefinitely.

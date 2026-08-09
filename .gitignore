@@ -17,3 +17,6 @@
 Session.vim
 Sessionx.vim
 .netrwhist
+
+# Superpowers subagent workspace (process artifacts, not project content)
+.superpowers/
