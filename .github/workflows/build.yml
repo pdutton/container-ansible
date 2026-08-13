@@ -48,11 +48,27 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y podman
           fi
-          # The Makefile defaults to absolute tool paths; fail loudly here
-          # rather than with a confusing "no such file" mid-build.
-          test -x /usr/bin/podman
-          test -x /usr/bin/awk
-          podman --version
+          # Resolve the tools from PATH and hand the results to make, rather
+          # than asserting they sit at the Makefile's default absolute paths.
+          #
+          # This step used to run `test -x /usr/bin/podman`. That broke on
+          # 2026-08-13, when the ubuntu-24.04 runner image moved podman off
+          # /usr/bin as it went from 4.9.3 to 5.8.4 (image release
+          # 20260810.271). During the rollout, jobs landed on either image, so
+          # the same commit passed or failed depending on which runner it drew
+          # -- and it would have failed every time once the rollout finished.
+          #
+          # The absolute path was never load-bearing: the Makefile takes PODMAN
+          # and AWK as overridable variables precisely so a caller can say where
+          # its tools are. CI is such a caller, and now says so.
+          PODMAN="$(command -v podman)"
+          AWK="$(command -v awk)"
+          test -n "$PODMAN" || { echo "ERROR: podman not on PATH after install" >&2; exit 1; }
+          test -n "$AWK"    || { echo "ERROR: awk not on PATH" >&2; exit 1; }
+          echo "PODMAN=$PODMAN" >> "$GITHUB_ENV"
+          echo "AWK=$AWK"       >> "$GITHUB_ENV"
+          echo "Using podman at $PODMAN, awk at $AWK"
+          "$PODMAN" --version
 
       # Publishing happens only from master. A dispatch against another branch
       # still builds and smoke-tests, so a branch can be put through CI, but it
@@ -63,7 +79,7 @@ jobs:
       # the job would silently do nothing.
       - name: Build and smoke-test
         if: github.event_name == 'pull_request' || github.ref != 'refs/heads/master'
-        run: make test-${{ matrix.variant }}
+        run: make PODMAN="$PODMAN" AWK="$AWK" test-${{ matrix.variant }}
 
       - name: Log in to Docker Hub
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
@@ -79,7 +95,7 @@ jobs:
       # on every invocation.
       - name: Build, smoke-test, and push
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
-        run: make push-${{ matrix.variant }}
+        run: make PODMAN="$PODMAN" AWK="$AWK" push-${{ matrix.variant }}
 
   # Docker Hub does not read anything from this repo on its own, so the overview
   # page would otherwise drift from DOCKERHUB-OVERVIEW.md the moment either
