@@ -133,13 +133,35 @@ the latest 14.x is at build time.
 ## Capability Differences
 
 Alpine and Ubuntu are not equivalent targets. Alpine has no packages for `winrm`, `pyspnego`, `requests-ntlm`,
-`kerberos`, `gssapi`, or `selinux`, so **the `alpine-stable` and `alpine-development` images do not support
-Windows/WinRM or Kerberos-authenticated targets.** The `ubuntu-stable` and `ubuntu-development` images do support
-both.
+`kerberos`, `gssapi`, or `selinux`, so **the `alpine-stable` and `alpine-development` images do not support the
+WinRM connection plugin or Kerberos-authenticated targets.** The `ubuntu-stable` and `ubuntu-development` images do
+support both.
+
+All four variants support Windows targets over the **PSRP** connection plugin (`ansible_connection: psrp`) via
+`pypsrp`, including the `credssp` extra. Neither distro packages `pypsrp`, so it is installed with pip on every
+variant — on the `stable` variants into the system Python, with every dependency the distro does package
+(`cryptography`, `requests`, and on Ubuntu `pyspnego` and `gssapi`) left to `apk`/`apt`.
+
+| `ansible_psrp_auth`                        | Alpine variants | Ubuntu variants |
+|--------------------------------------------|-----------------|-----------------|
+| `ntlm`, `basic`, `certificate`, `credssp`  | yes             | yes             |
+| `kerberos`, and `negotiate` via Kerberos   | no              | yes             |
+
+pyspnego's Kerberos backend needs both the `gssapi` and `krb5` Python modules. Alpine packages neither, so on the
+Alpine variants `negotiate` (the default) silently falls back to NTLM, which fails against hosts that refuse NTLM.
+Ubuntu packages `gssapi` but not `krb5`, so the Ubuntu variants compile `krb5` from PyPI at build time.
+
+The Ubuntu variants also carry `krb5-user` (`kinit`, `klist`), which the WinRM plugin's managed `kinit` relies on.
+Neither Ubuntu variant ships a realm configuration, so mount your own:
+
+```bash
+podman run -ti --rm -v /etc/krb5.conf:/etc/krb5.conf:ro -v "$PWD":/apps -w /apps \
+  docker.io/pdutton/ansible:ubuntu-stable ansible-playbook -i inventory site.yml
+```
 
 `json_query` (jmespath) and `password_hash` (passlib) work the same on all four variants.
 
-If your playbooks target Windows hosts or rely on Kerberos, use one of the Ubuntu variants.
+If your playbooks target Windows hosts over WinRM, or rely on Kerberos, use one of the Ubuntu variants.
 
 ## Building Locally
 

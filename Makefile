@@ -31,7 +31,7 @@ GIT_REV    := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 major-stable      := 13
 major-development := 14
 
-# Only the Ubuntu variants carry the winrm/kerberos/gssapi/selinux stack; the
+# Only the Ubuntu variants carry the winrm/kerberos/gssapi/krb5/selinux stack; the
 # smoke test asserts on this too, keyed off the OS half of the variant name.
 winrm-alpine  := false
 winrm-ubuntu  := true

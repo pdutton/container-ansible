@@ -10,6 +10,18 @@ LABEL org.opencontainers.image.title="ansible" \
 
 # --no-install-recommends plus an explicit list: keeps the functional packages
 # apt would recommend, drops X11/Sphinx/Babel ballast a container never uses.
+#
+# Ubuntu packages no pypsrp (PSRP connection plugin), requests-credssp, or krb5,
+# so those three alone come from pip, under /usr/local. --no-deps keeps pip from
+# installing a newer copy of any apt-owned dependency (pyspnego, gssapi,
+# cryptography, requests) into /usr/local, where it would silently shadow the
+# apt one.
+#
+# krb5 is what gives PSRP Kerberos: pyspnego's Kerberos backend needs both
+# gssapi and krb5, and krb5 publishes no Linux wheels, so it is compiled here.
+# pip and the compiler toolchain are installed only for this step and purged in
+# the same layer. krb5-user provides kinit/klist (also what the winrm plugin's
+# managed kinit runs); mount your own /etc/krb5.conf at runtime.
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       ansible \
@@ -26,6 +38,15 @@ RUN apt-get update \
       python3-gssapi \
       python3-requests \
       python3-argcomplete \
+      krb5-user \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      python3-pip gcc libc6-dev libkrb5-dev python3-dev \
+ && pip install --no-cache-dir --break-system-packages \
+      --no-deps \
+      "pypsrp>=0.4,<1" \
+      "requests-credssp>=2" \
+      "krb5>=0.3" \
+ && apt-get purge -y --auto-remove python3-pip gcc libc6-dev libkrb5-dev python3-dev \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /apps

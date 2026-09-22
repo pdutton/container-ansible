@@ -64,6 +64,57 @@
         success_msg: "winrm/gssapi/selinux import OK"
       when: expect_winrm == "true"
 
+    # Asks the psrp connection plugin itself whether it found pypsrp, rather
+    # than just importing pypsrp, so a plugin-side import change is caught too.
+    - name: Check PSRP capability (pypsrp, requests-credssp)
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - -c
+          - >-
+            import requests_credssp;
+            from ansible.plugins.connection import psrp;
+            assert psrp.HAS_PYPSRP, psrp.PYPSRP_IMP_ERR
+      register: psrp_capability
+      changed_when: false
+      failed_when: false
+
+    - name: Assert the psrp connection plugin has pypsrp and credssp
+      ansible.builtin.assert:
+        that:
+          - psrp_capability.rc == 0
+        fail_msg: >-
+          pypsrp/requests-credssp not usable by the psrp connection plugin
+          under {{ ansible_playbook_python }}: {{ psrp_capability.stderr }}
+        success_msg: "psrp connection plugin OK"
+
+    # pyspnego (PSRP's auth layer) silently falls back to NTLM-only when its
+    # Kerberos backend fails to import, so importing gssapi alone proves
+    # nothing -- it also needs krb5. HAS_GSSAPI is pyspnego's own verdict.
+    - name: Check Kerberos over PSRP (pyspnego gssapi+krb5 backend, kinit)
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - -c
+          - >-
+            import shutil, spnego._gss as g;
+            assert g.HAS_GSSAPI, g.GSSAPI_IMP_ERR;
+            assert shutil.which("kinit"), "kinit not on PATH"
+      register: psrp_kerberos
+      changed_when: false
+      failed_when: false
+      when: expect_winrm == "true"
+
+    - name: Assert pyspnego can do Kerberos and kinit is present
+      ansible.builtin.assert:
+        that:
+          - psrp_kerberos.rc == 0
+        fail_msg: >-
+          expect_winrm=true but Kerberos over PSRP is unavailable under
+          {{ ansible_playbook_python }}: {{ psrp_kerberos.stderr }}
+        success_msg: "PSRP Kerberos backend and kinit OK"
+      when: expect_winrm == "true"
+
     - name: Locate the ssh client
       ansible.builtin.command: which ssh
       register: ssh_path
