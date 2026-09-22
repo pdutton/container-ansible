@@ -13,7 +13,15 @@ LABEL org.opencontainers.image.title="ansible" \
 # created with --system-site-packages so it can see the apt-installed
 # winrm/kerberos/gssapi/selinux stack below, giving this variant the same
 # Windows/Kerberos/SELinux capability as ubuntu-stable -- selinux in particular
-# has no usable PyPI equivalent. Only Ansible itself comes from pip.
+# has no usable PyPI equivalent. Only Ansible, pypsrp (PSRP connection plugin)
+# and its requests-credssp/krb5 extras -- none of which Ubuntu packages -- come
+# from pip; pypsrp's pyspnego and gssapi are the apt ones.
+#
+# krb5 is what gives PSRP Kerberos: pyspnego's Kerberos backend needs both
+# gssapi and krb5, and krb5 publishes no Linux wheels, so it is compiled here.
+# The compiler toolchain is installed only for this step and purged in the same
+# layer. krb5-user provides kinit/klist (also what the winrm plugin's managed
+# kinit runs); mount your own /etc/krb5.conf at runtime.
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       python3 \
@@ -27,6 +35,8 @@ RUN apt-get update \
       python3-kerberos \
       python3-gssapi \
       python3-selinux \
+      krb5-user \
+      gcc libc6-dev libkrb5-dev python3-dev \
  && python3 -m venv --system-site-packages /opt/ansible \
  && /opt/ansible/bin/pip install --no-cache-dir \
       "ansible>=14,<15" \
@@ -35,6 +45,8 @@ RUN apt-get update \
       xmltodict \
       requests \
       argcomplete \
+      "pypsrp[credssp,kerberos]>=0.4,<1" \
+ && apt-get purge -y --auto-remove gcc libc6-dev libkrb5-dev python3-dev \
  && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/opt/ansible/bin:$PATH"

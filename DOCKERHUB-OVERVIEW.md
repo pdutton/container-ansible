@@ -30,8 +30,10 @@ COPY playbooks/ /apps/
 ## Useful Tags
 
 The container image builds on two operating systems and two ansible releases at a time, yielding
-four images.  The alpine variants are lightweight but lack WinRM or Kerberos support.  Use the
-ubuntu variants if you need those or to extend the container when you need glibc support.
+four images.  All four can manage Windows hosts over PSRP (`ansible_connection: psrp`) with
+NTLM, Basic, CredSSP, or certificate auth.  The alpine variants are lightweight but lack WinRM
+and Kerberos support.  Use the ubuntu variants if you need those (mount your own
+`/etc/krb5.conf`) or to extend the container when you need glibc support.
 
 | Tag | Aliases |
 |-----|---------|

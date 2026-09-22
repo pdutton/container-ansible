@@ -9,6 +9,8 @@ LABEL org.opencontainers.image.title="ansible" \
       org.opencontainers.image.base.name="docker.io/library/alpine:3.23"
 
 # System Python is PEP 668 externally-managed, so Ansible goes in a venv.
+# pypsrp (PSRP connection plugin) with the credssp extra gives Windows targets
+# NTLM/Basic/CredSSP/certificate auth. No Kerberos: Alpine has no gssapi.
 RUN apk add --no-cache \
       python3 \
       py3-pip \
@@ -21,7 +23,8 @@ RUN apk add --no-cache \
       passlib \
       xmltodict \
       requests \
-      argcomplete
+      argcomplete \
+      "pypsrp[credssp]>=0.4,<1"
 
 ENV PATH="/opt/ansible/bin:$PATH"
 

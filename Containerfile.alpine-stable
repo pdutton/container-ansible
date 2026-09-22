@@ -10,6 +10,15 @@ LABEL org.opencontainers.image.title="ansible" \
 
 # Alpine's ansible package pulls no SSH client, so openssh-client-default is
 # required. Note "openssh-client" is only a provides alias and will not resolve.
+#
+# Alpine packages no pypsrp (PSRP connection plugin) or its pure-Python
+# pyspnego/requests-credssp dependencies, so those three come from pip into the
+# system Python; pip itself is removed afterwards. --no-deps is load-bearing:
+# Alpine's py3-cryptography declares cffi>=2.0 while py3-cffi is older, so a
+# resolving pip "fixes" that by overwriting apk-owned cffi files. The compiled
+# dependencies (cryptography, cffi) and requests stay apk's. Gives Windows
+# targets NTLM/Basic/CredSSP/certificate auth over PSRP; no Kerberos, since
+# Alpine has no gssapi.
 RUN apk add --no-cache \
       ansible \
       openssh-client-default \
@@ -18,7 +27,15 @@ RUN apk add --no-cache \
       py3-passlib \
       py3-xmltodict \
       py3-requests \
-      py3-argcomplete
+      py3-argcomplete \
+      py3-cryptography \
+ && apk add --no-cache --virtual .pip py3-pip \
+ && pip install --no-cache-dir --break-system-packages \
+      --no-deps \
+      "pypsrp>=0.4,<1" \
+      "pyspnego>=0.7,<1" \
+      "requests-credssp>=2" \
+ && apk del .pip
 
 WORKDIR /apps
 CMD ["ansible", "--help"]
