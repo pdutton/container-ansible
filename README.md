@@ -194,6 +194,11 @@ those; it is not run automatically here because it would also delete untagged im
 additionally publishes them on a push to `master` or a `workflow_dispatch` run against `master`. Pull requests
 never receive registry credentials and never push.
 
+A push to `master` waits five minutes before building. If another push lands on `master` during that wait, the
+earlier run is cancelled and only the newest one builds and publishes, so merging several pull requests in quick
+succession produces one publish rather than one per merge. The cancelled runs show as cancelled in the Actions tab;
+their commits are included in the build that does run. Pull requests and `workflow_dispatch` runs do not wait.
+
 Publishing only ever happens from `master`. A manual `workflow_dispatch` run against another branch still builds
 and smoke-tests that branch, but publishes nothing — the tags in this repo are mutable pointers shared by every
 consumer, and a branch build must not be able to overwrite them by accident. (This is an accident guard, not a
