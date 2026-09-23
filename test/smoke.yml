@@ -143,3 +143,23 @@
         that:
           - (readback.content | b64decode) == "ok\n"
         fail_msg: "copy/slurp round-trip failed"
+
+    # The bundled pdutton.xplat collection: a filter proves it is on the
+    # collections path at all, and an action plugin proves its dispatch to the
+    # underlying module works (no facts gathered, so it picks ansible.builtin).
+    - name: Assert the pdutton.xplat basename filter handles a Windows path
+      ansible.builtin.assert:
+        that:
+          - "'C:\\Windows\\System32\\cmd.exe' | pdutton.xplat.basename == 'cmd.exe'"
+        fail_msg: "pdutton.xplat.basename failed - is the collection installed?"
+
+    - name: Stat the round-tripped file through pdutton.xplat
+      pdutton.xplat.stat:
+        path: /tmp/smoke/result.txt
+      register: xplat_stat
+
+    - name: Assert pdutton.xplat.stat found the file
+      ansible.builtin.assert:
+        that:
+          - xplat_stat.stat.exists
+        fail_msg: "pdutton.xplat.stat did not report /tmp/smoke/result.txt: {{ xplat_stat }}"

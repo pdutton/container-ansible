@@ -35,6 +35,11 @@ NTLM, Basic, CredSSP, or certificate auth.  The alpine variants are lightweight 
 and Kerberos support.  Use the ubuntu variants if you need those (mount your own
 `/etc/krb5.conf`) or to extend the container when you need glibc support.
 
+Every variant also bundles the
+[`pdutton.xplat`](https://github.com/pdutton/ansible-collection-xplat) collection, which
+provides cross-platform modules and path filters that dispatch to the Linux or Windows
+implementation as appropriate.
+
 | Tag | Aliases |
 |-----|---------|
 | `alpine-stable`      | `alpine` |
