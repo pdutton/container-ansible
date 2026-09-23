@@ -26,6 +26,22 @@ LATEST_VARIANT := ubuntu-stable
 BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 GIT_REV    := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 
+# The bundled pdutton.xplat collection tracks its master branch. It has no
+# Galaxy release, so every Containerfile installs it from git at XPLAT_REF.
+#
+# Resolved to a commit SHA here rather than passed as the literal "master":
+# podman caches a RUN layer by its text and build args, so with a fixed
+# "master" a local rebuild would reuse a stale clone indefinitely. With the SHA,
+# the install layer is rebuilt exactly when master moves, and nothing above it.
+#
+# Resolved lazily and at most once per make invocation: the value rewrites
+# itself to the result on first expansion (the `$(eval X := ...)$(X)` idiom).
+# Lazily, so help/clean never touch the network; once, so `make build` gives
+# all four variants the same commit even if master moves mid-build. `?=` keeps
+# it overridable -- `make XPLAT_REF=<sha> build` builds against that commit.
+XPLAT_REPO := https://github.com/pdutton/ansible-collection-xplat.git
+XPLAT_REF  ?= $(eval XPLAT_REF := $(shell git ls-remote $(XPLAT_REPO) refs/heads/master | $(AWK) '{print $$1}'))$(XPLAT_REF)
+
 # STABLE tracks Ansible 13, DEVELOPMENT tracks 14. The smoke test asserts on
 # this, so a distro bump fails loudly instead of silently redefining a channel.
 major-stable      := 13
@@ -92,7 +108,9 @@ build: $(addprefix build-,$(VARIANTS))
 test: $(addprefix test-,$(VARIANTS))
 
 build-%: Containerfile.%
+	@if [ -z "$(XPLAT_REF)" ]; then echo "ERROR: could not resolve pdutton.xplat master from $(XPLAT_REPO); set XPLAT_REF=<commit> to override" >&2; exit 1; fi
 	$(PODMAN) build -f Containerfile.$* -t $(LOCAL_IMAGE):$* \
+	  --build-arg XPLAT_REF=$(XPLAT_REF) \
 	  --label org.opencontainers.image.created=$(BUILD_DATE) \
 	  --label org.opencontainers.image.revision=$(GIT_REV) \
 	  .

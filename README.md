@@ -163,9 +163,38 @@ podman run -ti --rm -v /etc/krb5.conf:/etc/krb5.conf:ro -v "$PWD":/apps -w /apps
 
 If your playbooks target Windows hosts over WinRM, or rely on Kerberos, use one of the Ubuntu variants.
 
+## Bundled Collections
+
+Beyond the collections in the Ansible community bundle, every variant ships
+[`pdutton.xplat`](https://github.com/pdutton/ansible-collection-xplat): cross-platform modules
+(`pdutton.xplat.copy`, `pdutton.xplat.stat`, …) that dispatch to the `ansible.builtin` or `ansible.windows`
+implementation based on the target, plus path filters (`pdutton.xplat.basename`, …) that handle both Unix and
+Windows paths.
+
+It is installed under `/usr/share/ansible/collections`, on the default collections path for every user and for
+both the system Python and the `/opt/ansible` venv. It is installed with `--no-deps`, so it uses the bundle's own
+`community.general` and `ansible.windows` rather than pulling separate copies that would shadow them.
+
+`pdutton.xplat` tracks its `master` branch rather than a Galaxy release. The version `ansible-galaxy collection
+list` reports comes from its `galaxy.yml` and is not bumped on every commit, so two images can report the same
+version with different code. Each image's label records the exact commit:
+
+```bash
+skopeo inspect --format '{{index .Labels "io.github.pdutton.xplat.revision"}}' docker://docker.io/pdutton/ansible:alpine-stable
+```
+
+The Makefile resolves `master` to that commit when it builds, so a local rebuild picks up new xplat commits
+without `--no-cache`. There is no scheduled rebuild (see [Continuous Integration](#continuous-integration)), so
+a new xplat commit reaches the published images only when a build is triggered — the same as a new 14.x release
+does for the `development` variants. To build against a specific commit, run `make XPLAT_REF=<sha> build`.
+
+A `pdutton.xplat` in your own `~/.ansible/collections` (for example, from mounting your home directory's
+`~/.ansible` into the container) comes earlier on the collections path and takes precedence over the bundled copy.
+
 ## Building Locally
 
-Requires [Podman](https://podman.io/) and GNU Make.
+Requires [Podman](https://podman.io/), GNU Make, and git, plus network access to GitHub: the build targets
+resolve `pdutton.xplat`'s `master` with `git ls-remote` (see [Bundled Collections](#bundled-collections)).
 
 ```bash
 make build                 # build all four variants
