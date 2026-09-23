@@ -10,17 +10,49 @@ on:
 permissions:
   contents: read
 
-# Cancel superseded pull-request runs, but let a master push finish -- a
-# cancellation mid-push would leave a variant's tag set half-updated in the
-# registry.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+# Concurrency is set per job, not for the whole workflow. A master push has to
+# be cancellable while it waits in the debounce job, and must not be
+# cancellable once it has started publishing -- one workflow-level setting
+# cannot say both.
 
 jobs:
+  # A burst of pushes to master (several merges in a row) should publish once,
+  # from the last of them, not once per push. Each push run waits here first;
+  # a newer push to the same ref cancels the older run's wait, and the older
+  # run's build and description jobs are then skipped. Only a run whose wait
+  # completes undisturbed goes on to build.
+  #
+  # The superseded runs show as cancelled in the Actions tab and on their
+  # commits. That is expected: their commits are contained in the newer one
+  # that does build.
+  #
+  # Only `push` waits. A pull request builds straight away (it never publishes,
+  # and superseded PR builds are cancelled below anyway), and a
+  # workflow_dispatch is a deliberate request that should not be delayed.
+  debounce:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-debounce-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Wait for further pushes
+        if: github.event_name == 'push'
+        run: sleep 300
+
   build:
     name: ${{ matrix.variant }}
     runs-on: ubuntu-latest
+    needs: debounce
+    # Cancel superseded pull-request builds, but let a master build finish -- a
+    # cancellation mid-push would leave a variant's tag set half-updated in the
+    # registry. A newer master run that arrives meanwhile waits as pending (a
+    # still-newer one replaces it), so publishes stay in commit order.
+    #
+    # Keyed per variant: the four matrix legs each take this group separately,
+    # and a shared key would make them queue behind one another.
+    concurrency:
+      group: ${{ github.workflow }}-build-${{ github.ref }}-${{ matrix.variant }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     strategy:
       # One variant's failure must not stop the other three from publishing.
       # alpine-development resolves whatever 14.x pip serves that day and is
@@ -111,6 +143,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    # Serialized and not cancelled mid-update, so an older run cannot overwrite
+    # the page after a newer one has updated it.
+    concurrency:
+      group: ${{ github.workflow }}-description-${{ github.ref }}
+      cancel-in-progress: false
 
     steps:
       - uses: actions/checkout@v7
