@@ -175,8 +175,9 @@ It is installed under `/usr/share/ansible/collections`, on the default collectio
 both the system Python and the `/opt/ansible` venv. It is installed with `--no-deps`, so it uses the bundle's own
 `community.general` and `ansible.windows` rather than pulling separate copies that would shadow them.
 
-`pdutton.xplat` tracks its `master` branch. It has no Galaxy release and its `galaxy.yml` version never changes,
-so `ansible-galaxy collection list` always reports `1.0.0`. Read the commit an image carries from its label instead:
+`pdutton.xplat` tracks its `master` branch rather than a Galaxy release. The version `ansible-galaxy collection
+list` reports comes from its `galaxy.yml` and is not bumped on every commit, so two images can report the same
+version with different code. Each image's label records the exact commit:
 
 ```bash
 skopeo inspect --format '{{index .Labels "io.github.pdutton.xplat.revision"}}' docker://docker.io/pdutton/ansible:alpine-stable

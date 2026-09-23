@@ -53,8 +53,8 @@ RUN apt-get update \
 # comes from git, which is added for this step only. The Makefile resolves
 # master to a commit SHA and passes it as XPLAT_REF, so a new xplat commit
 # invalidates this layer and nothing above it; the default only serves a bare
-# `podman build`. The label records which commit went in, since the collection's
-# own version (galaxy.yml) never changes. --no-deps is load-bearing: xplat
+# `podman build`. The label records which commit went in, since galaxy.yml's
+# version is not bumped on every commit. --no-deps is load-bearing: xplat
 # declares community.general, and resolving it would put a Galaxy copy in
 # /usr/share/ansible/collections that shadows the one in the ansible bundle.
 # ansible-galaxy leaves a galaxy_cache and tmp dir in /root/.ansible, which no
