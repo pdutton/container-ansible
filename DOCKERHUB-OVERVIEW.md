@@ -18,6 +18,14 @@ ansible all -i inventory -m ping
 ansible-playbook -i inventory site.yml
 ```
 
+The container runs as root, so `ssh` logs in to remote hosts as `root` unless told otherwise. Add a
+`Host *` block with `User your-username` at the **end** of `~/.ssh/config` to make your own user
+the default; per-host `User` entries earlier in the file still win.
+
+With rootful Docker (the Linux default), the mounted `~/.ssh/config` is owned by your uid rather
+than root, and `ssh` refuses to read it (`Bad owner or permissions on /root/.ssh/config`). Use
+rootless Docker or Podman if you rely on an SSH config.
+
 ### Base Image
 
 Use it as a base image:

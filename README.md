@@ -23,6 +23,18 @@ The alias body is single-quoted and uses `"$PWD"` rather than `$(pwd)` so the mo
 invocation. A double-quoted alias body substitutes `$(pwd)` once, at the moment the alias is *defined* — it then
 permanently mounts that one directory no matter where you later `cd`, with no error to warn you.
 
+The container runs as root, so by default `ssh` logs in to remote hosts as `root`. To log in as your own user instead,
+add a catch-all block at the **end** of `~/.ssh/config`:
+
+```
+Host *
+    User your-username
+```
+
+`ssh` takes the first value it finds for each option, so a `User` in any earlier `Host` block still wins for that host,
+and Ansible's `ansible_user`, `remote_user`, and `-u` still override it. On the host itself the block changes nothing,
+since it names the user you already are.
+
 On an SELinux-enforcing host (e.g. Fedora/RHEL), mounting your real `~/.ssh` needs
 `--security-opt label=disable` added to the alias rather than a `:z`/`:Z` suffix on the mount — relabeling
 `~/.ssh` with `:z` would alter the SELinux context of your actual SSH keys on the host, which is actively
